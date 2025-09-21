@@ -1,0 +1,5 @@
+backend/serviceAccountKey.json
+node_modules/
+.env
+dist/
+build/
