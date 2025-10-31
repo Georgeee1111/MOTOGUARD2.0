@@ -6,18 +6,26 @@ import {
   Image,
   Modal,
   Pressable,
+  ImageBackground,
 } from "react-native";
 import { useRouter } from "expo-router";
 
-const welcome = () => {
+const Welcome = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const router = useRouter();
 
   return (
-    <View className="flex-1 items-center justify-center bg-white">
+    <ImageBackground
+      source={require("../../assets/images/BG_MG.jpg")}
+      resizeMode="cover"
+      className="flex-1 items-center justify-center"
+    >
+      {/* Dropdown (Login) */}
       <View className="absolute top-10 right-5">
         <TouchableOpacity onPress={() => setModalVisible(!modalVisible)}>
-          <Text className="text-green-800 font-bold text-[20px]">Login ▼</Text>
+          <Text className="text-green-900 font-semibold text-[20px]">
+            Login ▼
+          </Text>
         </TouchableOpacity>
 
         <Modal
@@ -27,9 +35,9 @@ const welcome = () => {
           onRequestClose={() => setModalVisible(false)}
         >
           <Pressable className="flex-1" onPress={() => setModalVisible(false)}>
-            <View className="absolute top-14 right-5 w-48 rounded-xl bg-container shadow-md">
+            <View className="absolute top-14 right-5 w-48 rounded-xl bg-white shadow-lg">
               <TouchableOpacity
-                className="p-3"
+                className="p-3 border-b border-gray-200"
                 onPress={() => {
                   setModalVisible(false);
                   router.push({
@@ -62,19 +70,24 @@ const welcome = () => {
         </Modal>
       </View>
 
+      {/* Logo */}
       <Image
-        source={require("../../assets/images/MOTOGUARD.png")}
+        source={require("../../assets/images/LOGO_MG.png")}
         resizeMode="contain"
+        className="w-40 h-40"
       />
 
-      <Text className="text-3xl font-bold text-green-800 mt-[16px] text-[38px]">
+      {/* Title */}
+      <Text className="text-4xl font-bold text-white mt-6 drop-shadow-lg">
         MotoGuard
       </Text>
-      <Text className="text-gray-600 mt-[16px] text-[20px]">
+
+      {/* Subtitle */}
+      <Text className="text-white mt-2 text-lg opacity-90">
         Ride, Track, Secure
       </Text>
-    </View>
+    </ImageBackground>
   );
 };
 
-export default welcome;
+export default Welcome;

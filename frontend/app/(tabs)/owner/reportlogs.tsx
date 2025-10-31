@@ -18,7 +18,7 @@ const ReportLogs: React.FC = () => {
     const fetchReports = async () => {
       try {
         const fetched = await getSentReports();
-        setReports(fetched);
+        setReports(fetched.reports || []);
       } catch (err) {
         console.error("Error fetching sent reports:", err);
       } finally {
@@ -38,6 +38,32 @@ const ReportLogs: React.FC = () => {
     );
   }
 
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "on progress":
+        return "text-yellow-500";
+      case "resolved":
+        return "text-green-500";
+      case "unread":
+        return "text-gray-400";
+      default:
+        return "text-gray-500";
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "on progress":
+        return "🟡";
+      case "resolved":
+        return "🟢";
+      case "unread":
+        return "⚪";
+      default:
+        return "⚪";
+    }
+  };
+
   return (
     <ScrollView className="flex-1 bg-white px-4 pt-4 pb-6">
       {reports.length === 0 ? (
@@ -55,22 +81,12 @@ const ReportLogs: React.FC = () => {
             </Text>
             <View className="flex-row items-center mt-1">
               <Text className="text-gray-600 text-sm mr-1">Status:</Text>
-              <Text
-                className={`text-sm mr-1 ${
-                  report.status === "unread"
-                    ? "text-yellow-500"
-                    : report.status === "read"
-                    ? "text-green-500"
-                    : "text-gray-500"
-                }`}
-              >
-                {report.status === "unread"
-                  ? "🟡"
-                  : report.status === "read"
-                  ? "🟢"
-                  : "⚪"}
+              <Text className={`text-sm mr-1 ${getStatusColor(report.status)}`}>
+                {getStatusIcon(report.status)}
               </Text>
-              <Text className="text-gray-500 italic text-sm">
+              <Text
+                className={`italic text-sm ${getStatusColor(report.status)}`}
+              >
                 {report.status}
               </Text>
             </View>

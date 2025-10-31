@@ -87,12 +87,13 @@ const SendReport = () => {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1 }}
+      style={{ flex: 1, backgroundColor: "white" }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 20}
     >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, backgroundColor: "white" }}>
+          {/* ✅ White wrapper */}
           <ScrollView
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
@@ -100,6 +101,7 @@ const SendReport = () => {
               paddingHorizontal: 16,
               paddingTop: 24,
               paddingBottom: 40,
+              backgroundColor: "white",
             }}
           >
             <View style={{ minHeight: 850 }}>

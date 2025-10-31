@@ -5,10 +5,19 @@ import {
   Pressable,
   ScrollView,
   ActivityIndicator,
+  Alert,
 } from "react-native";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  updateDoc,
+  doc,
+} from "firebase/firestore";
 import { firebaseAuth, db } from "@/firebase/firebaseClient";
 import CardContainer from "@/components/general/CardContainer";
+import { router } from "expo-router";
 
 type Report = {
   id: string;
@@ -19,6 +28,7 @@ type Report = {
   plate: string;
   brand: string;
   description: string;
+  status?: string;
 };
 
 export default function NotificationScreen() {
@@ -26,54 +36,89 @@ export default function NotificationScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchReports = async () => {
-      try {
-        const user = firebaseAuth.currentUser;
-        if (!user || !user.email) {
-          setError("User not authenticated. Please log in.");
-          setLoading(false);
-          return;
-        }
-
-        const reportsQuery = query(
-          collection(db, "reports"),
-          where("toEmail", "==", user.email)
-        );
-
-        const snapshot = await getDocs(reportsQuery);
-        const list: Report[] = [];
-
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          const submittedAt =
-            data.timestamp?.toDate?.() instanceof Date
-              ? data.timestamp.toDate().toLocaleString()
-              : "Unknown Date";
-
-          list.push({
-            id: doc.id,
-            reportId: data.reportId || doc.id,
-            submittedBy: data.owner || "Unknown",
-            submittedAt,
-            phone: data.phone || "N/A",
-            plate: data.plate || "N/A",
-            brand: data.brand || "N/A",
-            description: data.description || "No description provided.",
-          });
-        });
-
-        setReports(list);
-      } catch (err) {
-        console.error(err);
-        setError("Failed to load report notifications.");
-      } finally {
+  const fetchReports = async () => {
+    try {
+      const user = firebaseAuth.currentUser;
+      if (!user || !user.email) {
+        setError("User not authenticated. Please log in.");
         setLoading(false);
+        return;
       }
-    };
 
+      // ✅ only fetch reports assigned to this police email AND still unread
+      const reportsQuery = query(
+        collection(db, "reports"),
+        where("toEmail", "==", user.email),
+        where("status", "==", "unread")
+      );
+
+      const snapshot = await getDocs(reportsQuery);
+      const list: Report[] = [];
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const submittedAt =
+          data.timestamp?.toDate?.() instanceof Date
+            ? data.timestamp.toDate().toLocaleString()
+            : "Unknown Date";
+
+        list.push({
+          id: docSnap.id,
+          reportId: data.reportId || docSnap.id,
+          submittedBy: data.owner || "Unknown",
+          submittedAt,
+          phone: data.phone || "N/A",
+          plate: data.plate || "N/A",
+          brand: data.brand || "N/A",
+          description: data.description || "No description provided.",
+          status: data.status || "unread",
+        });
+      });
+
+      setReports(list);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to load report notifications.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchReports();
   }, []);
+
+  // ======================
+  // Accept Report Handler
+  // ======================
+  const handleAccept = async (id: string) => {
+    try {
+      await updateDoc(doc(db, "reports", id), {
+        status: "pending", // ✅ mark accepted → pending
+      });
+      Alert.alert("Success", "Report accepted.");
+      fetchReports(); // refresh list
+    } catch (err) {
+      console.error("Error accepting report:", err);
+      Alert.alert("Error", "Failed to accept report.");
+    }
+  };
+
+  // ======================
+  // Reject Report Handler
+  // ======================
+  const handleReject = async (id: string) => {
+    try {
+      await updateDoc(doc(db, "reports", id), {
+        status: "rejected", // ✅ mark rejected
+      });
+      Alert.alert("Success", "Report rejected.");
+      fetchReports(); // refresh list
+    } catch (err) {
+      console.error("Error rejecting report:", err);
+      Alert.alert("Error", "Failed to reject report.");
+    }
+  };
 
   if (loading) {
     return (
@@ -94,7 +139,7 @@ export default function NotificationScreen() {
   if (reports.length === 0) {
     return (
       <View className="flex-1 justify-center items-center bg-white p-4">
-        <Text className="text-gray-600">No report notifications found.</Text>
+        <Text className="text-gray-600">No unread report notifications.</Text>
       </View>
     );
   }
@@ -123,7 +168,11 @@ export default function NotificationScreen() {
 
           <View className="flex-row items-center mb-1">
             <Text className="text-sm text-black">Location: </Text>
-            <Pressable>
+            <Pressable
+              onPress={() =>
+                router.push("/policeviewlocations/policeviewlocation")
+              }
+            >
               <Text className="text-blue-600 underline">View location</Text>
             </Pressable>
           </View>
@@ -137,17 +186,12 @@ export default function NotificationScreen() {
             {report.description}
           </Text>
 
-          <Pressable>
-            <Text className="text-blue-600 underline text-sm">
-              View attached documents
-            </Text>
-          </Pressable>
-
+          {/* no need to show current status, police only sees "unread" */}
           <View className="flex-row justify-between px-5 mt-4">
-            <Pressable>
+            <Pressable onPress={() => handleAccept(report.id)}>
               <Text className="text-green-600 text-sm">✅ Accept</Text>
             </Pressable>
-            <Pressable>
+            <Pressable onPress={() => handleReject(report.id)}>
               <Text className="text-red-600 text-sm">❌ Reject</Text>
             </Pressable>
           </View>

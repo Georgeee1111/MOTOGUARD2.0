@@ -2,7 +2,7 @@ import axios from "axios";
 import { signInWithEmailAndPassword, getIdToken } from "firebase/auth";
 import { firebaseAuth } from "@/firebase/firebaseClient";
 
-const API_BASE_URL = "http://192.168.148.40:5000";
+const API_BASE_URL = "http://192.168.1.8:5000";
 
 const getAuthHeader = async () => {
   const currentUser = firebaseAuth.currentUser;
@@ -113,5 +113,57 @@ export const getProtectedData = async (endpoint: string) => {
     },
   });
 
+  return response.data;
+};
+
+export const getUnreadReports = async () => {
+  const config = await getAuthHeader();
+  const response = await axios.get(
+    `${API_BASE_URL}/api/reports/status/unread`,
+    config
+  );
+  return response.data;
+};
+
+export const archiveReportApi = async (reportId: string) => {
+  const config = await getAuthHeader();
+  const response = await axios.patch(
+    `${API_BASE_URL}/api/reports/${reportId}/archive`,
+    {},
+    config
+  );
+  return response.data;
+};
+
+export const updateUserInfo = async (
+  uid: string,
+  updatedData: any,
+  role: string
+) => {
+  const currentUser = firebaseAuth.currentUser;
+  if (!currentUser) throw new Error("No authenticated user");
+
+  const token = await getIdToken(currentUser);
+
+  const endpoint =
+    role === "police"
+      ? `${API_BASE_URL}/api/users/update-station/${uid}`
+      : `${API_BASE_URL}/api/users/update-user/${uid}`;
+
+  const response = await axios.patch(endpoint, updatedData, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return response.data;
+};
+
+export const getLatestReportByStation = async (stationId: string) => {
+  const config = await getAuthHeader();
+  const response = await axios.get(
+    `${API_BASE_URL}/api/reports/latest/${stationId}`,
+    config
+  );
   return response.data;
 };

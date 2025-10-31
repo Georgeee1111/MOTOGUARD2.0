@@ -9,7 +9,7 @@ interface ArduinoData {
   moved?: boolean;
 }
 
-const LocationScreen = () => {
+const PoliceViewLocation = () => {
   const [arduinoData, setArduinoData] = useState<ArduinoData | null>(null);
   const [loading, setLoading] = useState(true);
   const mapRef = useRef<MapView>(null);
@@ -17,12 +17,14 @@ const LocationScreen = () => {
   useEffect(() => {
     const fetchArduinoData = async () => {
       try {
+        // 🛰 Fetch the Arduino's live GPS location
         const res = await fetch("http://192.168.1.8:5000/api/arduino");
         const data: ArduinoData = await res.json();
+
         if (data.lat != null && data.lng != null) {
           setArduinoData(data);
 
-          // Animate map to new location
+          // Smoothly move map camera to the new position
           const region: Region = {
             latitude: data.lat,
             longitude: data.lng,
@@ -38,10 +40,9 @@ const LocationScreen = () => {
       }
     };
 
-    // fetch once on mount
     fetchArduinoData();
 
-    // fetch every 5s for live updates
+    // Auto-refresh every 5 seconds
     const interval = setInterval(fetchArduinoData, 5000);
     return () => clearInterval(interval);
   }, []);
@@ -50,7 +51,7 @@ const LocationScreen = () => {
     return (
       <View className="flex-1 justify-center items-center">
         <ActivityIndicator size="large" />
-        <Text>Fetching Arduino GPS...</Text>
+        <Text>Fetching vehicle GPS...</Text>
       </View>
     );
   }
@@ -58,7 +59,7 @@ const LocationScreen = () => {
   if (!arduinoData) {
     return (
       <View className="flex-1 justify-center items-center">
-        <Text className="text-red-600">No Arduino data available yet</Text>
+        <Text className="text-red-600">No GPS data available yet</Text>
       </View>
     );
   }
@@ -79,17 +80,18 @@ const LocationScreen = () => {
           urlTemplate="https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png"
           maximumZ={19}
         />
+
         <Marker
           coordinate={{ latitude: arduinoData.lat, longitude: arduinoData.lng }}
-          title="Device Location"
+          title="Vehicle Location"
           description={
             arduinoData.moved
               ? `Moved ${
                   typeof arduinoData.distance === "number"
                     ? arduinoData.distance.toFixed(2)
                     : "N/A"
-                }m from home`
-              : "Still at home"
+                }m from base`
+              : "Still in place"
           }
         />
       </MapView>
@@ -97,4 +99,4 @@ const LocationScreen = () => {
   );
 };
 
-export default LocationScreen;
+export default PoliceViewLocation;

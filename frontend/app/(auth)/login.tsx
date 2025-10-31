@@ -1,4 +1,12 @@
-import { View, Image, Platform, Alert } from "react-native";
+import {
+  View,
+  Image,
+  Platform,
+  Alert,
+  Pressable,
+  Text,
+  ImageBackground,
+} from "react-native";
 import React from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FormInput from "@/components/general/FormInput";
@@ -11,12 +19,13 @@ import { LoginFormValues } from "@/interfaces/login/Login";
 import { firebaseAuth } from "@/firebase/firebaseClient";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { getEmailByUsername, getUserProfile } from "@/lib/api";
+import { FontAwesome } from "@expo/vector-icons";
 
 const Login = () => {
   const router = useRouter();
   const rawRole = useLocalSearchParams().role;
   const role = Array.isArray(rawRole) ? rawRole[0] : rawRole;
-  const [loading, setLoading] = React.useState(false);
+  const [showPassword, setShowPassword] = React.useState(false);
 
   const getRoutePath = (
     role: string | undefined,
@@ -33,12 +42,13 @@ const Login = () => {
     }
   };
 
+  const togglePasswordVisibility = () => setShowPassword((prev) => !prev);
+
   const handleSignUpPress = () => router.push(getRoutePath(role, "signup"));
 
   const handleLogin = async (values: LoginFormValues) => {
     try {
       const email = await getEmailByUsername(values.username);
-
       if (!email) {
         Alert.alert("Login Failed", "Username not found");
         return;
@@ -51,7 +61,6 @@ const Login = () => {
       );
 
       const profile = await getUserProfile(userCredential.user.uid);
-
       if (!profile?.role) {
         Alert.alert("Login Failed", "User role not found");
         return;
@@ -66,90 +75,127 @@ const Login = () => {
           : error?.code === "auth/wrong-password"
           ? "Incorrect password"
           : "Login failed. Please check your credentials";
-
       Alert.alert("Login Failed", errorMessage);
     }
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-white" edges={["top", "left", "right"]}>
-      <KeyboardAwareScrollView
-        enableOnAndroid
-        enableAutomaticScroll
-        extraScrollHeight={Platform.OS === "ios" ? 80 : 100}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{
-          flexGrow: 1,
-          justifyContent: "center",
-          paddingBottom: 20,
-        }}
+    <SafeAreaView className="flex-1" edges={["top", "left", "right"]}>
+      <ImageBackground
+        source={require("../../assets/images/BG_MG.jpg")}
+        resizeMode="cover"
+        className="flex-1 justify-center"
       >
-        <View className="items-center mb-5">
-          <Image
-            source={require("@/assets/images/MOTOGUARD.png")}
-            resizeMode="contain"
-          />
-        </View>
-
-        <Formik<LoginFormValues>
-          initialValues={{ username: "", password: "" }}
-          validationSchema={loginValidationSchema}
-          onSubmit={handleLogin}
+        <KeyboardAwareScrollView
+          enableOnAndroid
+          enableAutomaticScroll
+          extraScrollHeight={Platform.OS === "ios" ? 80 : 100}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{
+            flexGrow: 1,
+            justifyContent: "center",
+            paddingBottom: 20,
+          }}
         >
-          {({
-            handleChange,
-            handleBlur,
-            handleSubmit,
-            values,
-            errors,
-            touched,
-            isValid,
-          }) => (
-            <View className="px-6 space-y-3">
-              <FormInput
-                placeholder="Username"
-                value={values.username}
-                onChangeText={handleChange("username")}
-                onBlur={handleBlur("username")}
-                error={
-                  touched.username && errors.username ? errors.username : ""
-                }
-              />
-              <FormInput
-                placeholder="Password"
-                secureTextEntry
-                value={values.password}
-                onChangeText={handleChange("password")}
-                onBlur={handleBlur("password")}
-                error={
-                  touched.password && errors.password ? errors.password : ""
-                }
-              />
+          <View className="items-center mb-8">
+            <Image
+              source={require("../../assets/images/LOGO_MG.png")}
+              resizeMode="contain"
+              className="w-32 h-32"
+            />
+          </View>
 
-              <View className="flex-row justify-between mt-8">
-                <View className="flex-1 mr-2">
-                  <CustomButton
-                    title="Sign up"
-                    onPress={handleSignUpPress}
-                    containerStyle={{ paddingVertical: 12 }}
-                  />
-                </View>
-                <View className="flex-1 ml-2">
+          <Formik<LoginFormValues>
+            initialValues={{ username: "", password: "" }}
+            validationSchema={loginValidationSchema}
+            onSubmit={handleLogin}
+          >
+            {({
+              handleChange,
+              handleBlur,
+              handleSubmit,
+              values,
+              errors,
+              touched,
+              isValid,
+            }) => (
+              <View className="px-6 space-y-3">
+                {/* Username Input */}
+                <FormInput
+                  placeholder="Username"
+                  value={values.username}
+                  onChangeText={handleChange("username")}
+                  onBlur={handleBlur("username")}
+                  error={
+                    touched.username && errors.username ? errors.username : ""
+                  }
+                  placeholderColor="#E5E7EB"
+                  textColor="#FFFFFF"
+                  inputStyle={{ fontSize: 18 }}
+                />
+
+                {/* Password Input */}
+                <FormInput
+                  placeholder="Password"
+                  secureTextEntry={!showPassword}
+                  value={values.password}
+                  onChangeText={handleChange("password")}
+                  onBlur={handleBlur("password")}
+                  error={
+                    touched.password && errors.password ? errors.password : ""
+                  }
+                  placeholderColor="#E5E7EB"
+                  textColor="#FFFFFF"
+                  rightIcon={
+                    <Pressable onPress={togglePasswordVisibility}>
+                      <FontAwesome
+                        name={showPassword ? "eye-slash" : "eye"}
+                        size={20}
+                        color="#E5E7EB"
+                      />
+                    </Pressable>
+                  }
+                />
+
+                {/* ✅ Centered Sign In Button */}
+                <View style={{ alignItems: "center", marginTop: 40 }}>
                   <CustomButton
                     title="Sign in"
                     onPress={handleSubmit as () => void}
                     disabled={!isValid}
                     containerStyle={{
-                      paddingVertical: 12,
+                      width: "60%",
                       backgroundColor: isValid ? "#65A30D" : "#A5ADAF",
+                      paddingVertical: 12,
+                      borderRadius: 6,
+                      alignSelf: "center",
+                    }}
+                    textStyle={{
+                      color: "white",
+                      fontSize: 16,
+                      fontWeight: "600",
+                      textAlign: "center",
                     }}
                   />
                 </View>
+
+                {/* Sign Up Link */}
+                <View className="items-center mt-4">
+                  <Text className="text-white text-base">
+                    Not registered yet?{" "}
+                    <Text
+                      className="text-white underline"
+                      onPress={handleSignUpPress}
+                    >
+                      Sign up
+                    </Text>
+                  </Text>
+                </View>
               </View>
-            </View>
-          )}
-        </Formik>
-      </KeyboardAwareScrollView>
+            )}
+          </Formik>
+        </KeyboardAwareScrollView>
+      </ImageBackground>
     </SafeAreaView>
   );
 };

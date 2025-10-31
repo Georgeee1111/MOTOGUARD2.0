@@ -1,29 +1,70 @@
 import React from "react";
-import { View, TextInput, Text, TextInputProps } from "react-native";
+import {
+  View,
+  TextInput,
+  Text,
+  TextInputProps,
+  ViewStyle,
+  TextStyle,
+} from "react-native";
 
 interface FormInputProps extends TextInputProps {
   error?: string;
+  rightIcon?: React.ReactNode;
+  containerStyle?: ViewStyle;
+  inputStyle?: TextStyle;
+  errorStyle?: TextStyle;
+  wrapperStyle?: ViewStyle;
+  placeholderColor?: string;
+  textColor?: string;
 }
 
-const FormInput: React.FC<FormInputProps> = ({ error, style, ...props }) => {
+const FormInput: React.FC<FormInputProps> = ({
+  error,
+  rightIcon,
+  style,
+  containerStyle,
+  inputStyle,
+  errorStyle,
+  wrapperStyle,
+  placeholderColor = "#999",
+  textColor = "#000",
+  ...props
+}) => {
   return (
-    <View>
-      <TextInput
-        {...props}
+    <View style={[{ marginBottom: 16 }, containerStyle]}>
+      <View
         style={[
           {
+            flexDirection: "row",
+            alignItems: "center",
             borderBottomWidth: 1,
             borderBottomColor: error ? "red" : "#D1D5DB",
-            paddingVertical: 15,
-            fontSize: 20,
-            color: "#000",
           },
-          style,
+          wrapperStyle,
         ]}
-        placeholderTextColor="#999"
-      />
+      >
+        <TextInput
+          {...props}
+          style={[
+            {
+              flex: 1,
+              paddingVertical: 15,
+              fontSize: 20,
+              color: textColor,
+            },
+            inputStyle,
+            style,
+          ]}
+          placeholderTextColor={placeholderColor}
+        />
+        {rightIcon ? <View style={{ marginLeft: 8 }}>{rightIcon}</View> : null}
+      </View>
+
       {error ? (
-        <Text style={{ color: "red", marginTop: 4, fontSize: 12 }}>
+        <Text
+          style={[{ color: "red", marginTop: 4, fontSize: 12 }, errorStyle]}
+        >
           {error}
         </Text>
       ) : null}

@@ -9,14 +9,15 @@ interface StepTwoProps {
 }
 
 const StepTwoUpload = ({ agree, setAgree, onSubmit, onBack }: StepTwoProps) => (
-  <>
+  <View>
     {[
       "LTO Official Receipt and Certificate of Registration",
       "any of your Valid ID",
     ].map((label, i) => (
       <TouchableOpacity
         key={i}
-        className="bg-white shadow-md rounded-xl p-4 mb-4"
+        className="shadow-md rounded-xl p-4 mb-4"
+        style={{ backgroundColor: "#F4F2F2" }}
         onPress={() => {}}
       >
         <Text className="text-center text-sm text-gray-800">
@@ -51,7 +52,7 @@ const StepTwoUpload = ({ agree, setAgree, onSubmit, onBack }: StepTwoProps) => (
     >
       <Text className="text-[#7A9D54] text-base">Back</Text>
     </TouchableOpacity>
-  </>
+  </View>
 );
 
 export default StepTwoUpload;
