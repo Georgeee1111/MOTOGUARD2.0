@@ -1,10 +1,9 @@
+// index.js (GSM-only backend + mock support)
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const { SerialPort } = require("serialport");
-const { ReadlineParser } = require("@serialport/parser-readline");
 
-// ✅ Firebase Admin SDK
+// Firebase Admin SDK
 const admin = require("./config/firebase");
 
 dotenv.config();
@@ -16,16 +15,21 @@ app.use(express.json());
 // --------------------
 // ⚙️ Configuration
 // --------------------
-const USE_ARDUINO = false;
-const USE_MOCK_DATA = true;
-const ARDUINO_PORT = "COM3";
-const BAUD_RATE = 9600;
-const DISTANCE_THRESHOLD = 15; // meters
-const GPS_NOISE_THRESHOLD = 5;
+const USE_ARDUINO = true; // USB serial disabled for GSM-only mode
+const USE_MOCK_DATA = false; // keep mock simulation if you want
+const DISTANCE_THRESHOLD = 15; // emergency threshold (meters)
+const GPS_NOISE_THRESHOLD = 5; // noise threshold (meters)
 const HOME_READINGS_REQUIRED = 3;
-const MOCK_INTERVAL = 5000; // 5 seconds
-const REPORT_COOLDOWN_MS = 60 * 1000; // 1 minute
+const MOCK_INTERVAL = 5000; // ms between mock samples
+const REPORT_COOLDOWN_MS = 60 * 1000; // 1 minute cooldown per station
 
+// Optional shared secret for GPS posts (put in .env as GPS_SECRET)
+const GPS_SECRET = process.env.GPS_SECRET || null;
+
+// --------------------
+// ✅ Runtime state
+// --------------------
+let SYSTEM_ACTIVE = false;
 let latestArduinoData = { error: "No data yet" };
 let systemLogs = [];
 let notificationLogs = [];
@@ -33,12 +37,14 @@ let homeLocation = null;
 let initialReadings = [];
 let policeStations = [];
 let emergencyActive = false;
+const lastReports = {}; // per-station cooldown tracking
 
-// ⏱ Track last emergency report time per station
-const lastReports = {};
+// Mock loop control
+let _mockIntervalId = null;
+let _mockLoopRunning = false;
 
 // --------------------
-// 🚓 Load Police Stations
+// 🚓 Load Police Stations (from Firestore)
 // --------------------
 async function loadPoliceStations() {
   try {
@@ -46,9 +52,11 @@ async function loadPoliceStations() {
     policeStations = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
-      lat: doc.data().position.latitude,
-      lng: doc.data().position.longitude,
-    }));
+      // Expect position to be a GeoPoint-like object with lat/lng
+      lat: doc.data().position?.latitude ?? null,
+      lng: doc.data().position?.longitude ?? null,
+    })).filter(s => s.lat !== null && s.lng !== null);
+
     console.log(`🚓 Loaded ${policeStations.length} police stations`);
   } catch (err) {
     console.error("❌ Failed to load police stations:", err.message);
@@ -57,7 +65,7 @@ async function loadPoliceStations() {
 loadPoliceStations();
 
 // --------------------
-// 🔧 Kalman Filter
+// 🔧 Kalman Filter (1D) for smoothing lat/lng
 // --------------------
 class KalmanFilter1D {
   constructor(R = 0.00001, Q = 0.0001) {
@@ -83,7 +91,7 @@ const kalmanLat = new KalmanFilter1D();
 const kalmanLng = new KalmanFilter1D();
 
 // --------------------
-// 🔢 Haversine Formula
+// 🔢 Haversine distance (meters)
 // --------------------
 function getDistance(lat1, lon1, lat2, lon2) {
   const R = 6371000;
@@ -99,146 +107,161 @@ function getDistance(lat1, lon1, lat2, lon2) {
 }
 
 // --------------------
-// 🧭 Find nearest station
+// 🧭 Find nearest station (uses motorcycle coords)
 // --------------------
-function getNearestStation(lat, lng, stations, maxDistance = 100) {
+function getNearestStation(motoLat, motoLng, stations, maxDistance = 100) {
   let nearest = null;
   let minDist = Infinity;
+
   for (const station of stations) {
-    const distance = getDistance(lat, lng, station.lat, station.lng);
-    if (distance < minDist) {
-      minDist = distance;
-      nearest = { ...station, distance };
+    const d = getDistance(motoLat, motoLng, station.lat, station.lng);
+    if (d < minDist) {
+      minDist = d;
+      nearest = { ...station, distance: d };
     }
   }
-  return nearest && nearest.distance <= maxDistance ? nearest : null;
+
+  if (nearest && nearest.distance <= maxDistance) return nearest;
+  return null;
 }
 
 // --------------------
-// 🔧 Handle incoming GPS data
+// 🔧 Core handler: process incoming GPS (from GSM or mock)
 // --------------------
-async function handleData(data, arduinoPort, isMock = false) {
-  if (!data.lat || !data.lng) return;
-
-  // Step 1: Establish home
-  if (!homeLocation) {
-    initialReadings.push({ lat: data.lat, lng: data.lng });
-    if (initialReadings.length >= HOME_READINGS_REQUIRED) {
-      homeLocation = {
-        lat: initialReadings.reduce((sum, r) => sum + r.lat, 0) / initialReadings.length,
-        lng: initialReadings.reduce((sum, r) => sum + r.lng, 0) / initialReadings.length,
-      };
-      console.log("🏠 Home location set:", homeLocation);
-    } else return;
-  }
-
-  // Step 2: Smooth coordinates
-  const smoothedLat = isMock ? data.lat : kalmanLat.filter(data.lat);
-  const smoothedLng = isMock ? data.lng : kalmanLng.filter(data.lng);
-
-  // Step 3: Measure distance
-  const distance = getDistance(homeLocation.lat, homeLocation.lng, smoothedLat, smoothedLng);
-  const moved = distance > GPS_NOISE_THRESHOLD;
-  latestArduinoData = { ...data, distance, moved };
-
-  console.log("📩 Data after smoothing:", latestArduinoData);
-
-  // ------------------------------
-  // ✅ NORMAL: 0–10m
-  // ------------------------------
-  if (distance < 11) {
-    if (emergencyActive) {
-      console.log("✅ Vehicle returned to safe zone. Emergency cleared.");
-      emergencyActive = false;
-    }
-
-    console.log(`✅ Safe movement (${distance.toFixed(2)}m) — below warning threshold.`);
-
-    await admin.database().ref("device1/history").push({
-      ...latestArduinoData,
-      status: "normal",
-      createdAt: admin.database.ServerValue.TIMESTAMP,
-    });
-
-    if (arduinoPort) arduinoPort.write("BUZZ_OFF\n");
+async function handleData(data, source = "gsm", isMock = false) {
+  // Basic validation
+  if (typeof data.lat === "undefined" || typeof data.lng === "undefined") {
+    console.log("⚠️ Incoming GPS missing lat/lng, ignoring");
     return;
   }
 
-  // ------------------------------
-  // ⚠️ WARNING: 11–14m
-  // ------------------------------
-    if (distance >= 11 && distance < DISTANCE_THRESHOLD) {
-    console.log(`⚠️ Warning — ${distance.toFixed(2)}m from home!`);
+  // If system is not active: just keep last reading but do not calibrate or alert
+  if (!SYSTEM_ACTIVE) {
+    latestArduinoData = { ...data, system: "inactive" };
+    console.log("⛔ SYSTEM INACTIVE — GPS logged but no detection.");
+    return;
+  }
 
+  // If home not set yet — use initial readings (calibration) only while system active
+  if (!homeLocation) {
+    initialReadings.push({ lat: data.lat, lng: data.lng });
+    console.log(`🏠 Home setup progress: ${initialReadings.length}/${HOME_READINGS_REQUIRED}`);
+
+    if (initialReadings.length >= HOME_READINGS_REQUIRED) {
+      homeLocation = {
+        lat: initialReadings.reduce((s, r) => s + r.lat, 0) / initialReadings.length,
+        lng: initialReadings.reduce((s, r) => s + r.lng, 0) / initialReadings.length,
+      };
+      // Reset kalman filters to avoid bias from previous runs
+      kalmanLat.x = null;
+      kalmanLng.x = null;
+
+      console.log("✅ Home location established:", homeLocation);
+    } else {
+      // update last reading and return until calibration complete
+      latestArduinoData = { lat: data.lat, lng: data.lng, timestamp: data.timestamp || Date.now(), system: "calibrating" };
+      return;
+    }
+  }
+
+  // Smooth coordinates (Kalman) unless it's mock and you prefer no smoothing for mock
+  const smoothedLat = isMock ? data.lat : kalmanLat.filter(data.lat);
+  const smoothedLng = isMock ? data.lng : kalmanLng.filter(data.lng);
+
+  const distanceFromHome = getDistance(homeLocation.lat, homeLocation.lng, smoothedLat, smoothedLng);
+  const moved = distanceFromHome > GPS_NOISE_THRESHOLD;
+
+  latestArduinoData = {
+    lat: smoothedLat,
+    lng: smoothedLng,
+    timestamp: data.timestamp || Date.now(),
+    distance: distanceFromHome,
+    moved,
+    source,
+  };
+
+  // Useful logs similar to what you wanted
+  if (distanceFromHome < 11) {
+    console.log(`✅ Safe movement (${distanceFromHome.toFixed(2)}m) — below warning threshold.`);
+    console.log(`📩 Data after smoothing: ${JSON.stringify(latestArduinoData)}`);
+    // push normal status to RTDB
+    try {
+      await admin.database().ref("device1/history").push({
+        ...latestArduinoData,
+        status: "normal",
+        createdAt: admin.database.ServerValue.TIMESTAMP,
+      });
+    } catch (err) {
+      console.error("❌ Failed to push normal to RTDB:", err.message);
+    }
+    emergencyActive = false;
+    return;
+  }
+
+  // Warning range
+  if (distanceFromHome >= 11 && distanceFromHome < DISTANCE_THRESHOLD) {
+    console.log(`⚠️ Warning — ${distanceFromHome.toFixed(2)}m from home!`);
     const nearestStation = getNearestStation(smoothedLat, smoothedLng, policeStations, 100);
+
     const warningData = {
       lat: smoothedLat,
       lng: smoothedLng,
-      distance,
+      distance: distanceFromHome,
       type: "warning",
-      message: "Warning Alert", // ✅ simplified message
+      message: "Warning Alert",
       station_id: nearestStation ? nearestStation.id : null,
-      station_name: nearestStation
-        ? nearestStation.name || nearestStation.stationName
-        : null,
+      station_name: nearestStation ? (nearestStation.name || nearestStation.stationName) : null,
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
     };
 
-    // 🔔 Save warning notification to Firestore
-    await admin.firestore().collection("notifications").add(warningData);
-    console.log("⚠️ Warning notification saved to Firestore");
+    try {
+      await admin.firestore().collection("notifications").add(warningData);
+      console.log("⚠️ Warning notification saved to Firestore");
+    } catch (err) {
+      console.error("❌ Failed to save warning notification:", err.message);
+    }
 
-    // ✅ Push to in-memory logs (so frontend can display it)
     notificationLogs.push({
-      number: nearestStation ? nearestStation.contact_number || "N/A" : "N/A",
-      message: "Warning Alert", // ✅ simplified message
+      number: nearestStation ? (nearestStation.contact_number || nearestStation.contactNumber || "N/A") : "N/A",
+      message: "Warning Alert",
       type: "warning",
       date: new Date().toLocaleString(),
       timestamp: new Date(),
     });
-    console.log("⚠️ Warning notification added to memory");
 
-    // Optional: also log to RTDB
-    await admin.database().ref("device1/history").push({
-      ...latestArduinoData,
-      status: "warning",
-      createdAt: admin.database.ServerValue.TIMESTAMP,
-    });
+    try {
+      await admin.database().ref("device1/history").push({
+        ...latestArduinoData,
+        status: "warning",
+        createdAt: admin.database.ServerValue.TIMESTAMP,
+      });
+    } catch (err) {
+      console.error("❌ Failed to push warning to RTDB history:", err.message);
+    }
 
-    if (arduinoPort) arduinoPort.write("BUZZ_OFF\n");
     return;
   }
 
-  // ------------------------------
-  // 🚨 EMERGENCY: 15m or more
-  // ------------------------------
+  // Emergency range
+  console.log("🚨 EMERGENCY: Vehicle moved beyond safety threshold!");
   const nearestStation = getNearestStation(smoothedLat, smoothedLng, policeStations, 100);
   if (!nearestStation) {
-    console.log("🚨 No nearby station within 100m radius");
+    console.log("🚨 No nearby station within 100m radius — cannot auto-report.");
     return;
   }
 
   const stationId = nearestStation.id;
   const now = Date.now();
-
   if (lastReports[stationId] && now - lastReports[stationId] < REPORT_COOLDOWN_MS) {
-    console.log(
-      `⏱ Duplicate emergency skipped for ${nearestStation.name || nearestStation.stationName}`
-    );
+    console.log(`⏱ Emergency skipped — cooldown active for ${nearestStation.name || nearestStation.stationName}`);
     return;
   }
-
   lastReports[stationId] = now;
   emergencyActive = true;
 
-  console.log(
-    `🚨 Nearest station: ${nearestStation.name || nearestStation.stationName} (${nearestStation.distance.toFixed(
-      2
-    )}m)`
-  );
+  console.log(`🚨 Nearest station: ${nearestStation.name || nearestStation.stationName} (${nearestStation.distance.toFixed(2)}m)`);
 
-  const contactNumber =
-    nearestStation.contact_number || nearestStation.contactNumber || null;
+  const contactNumber = nearestStation.contact_number || nearestStation.contactNumber || null;
 
   const autoReport = {
     station_id: stationId,
@@ -247,7 +270,7 @@ async function handleData(data, arduinoPort, isMock = false) {
     lng: smoothedLng,
     distance: nearestStation.distance,
     contact_number: contactNumber,
-    source: isMock ? "mock" : "arduino",
+    source: isMock ? "mock" : "gsm",
     status: "emergency",
     message: "Vehicle moved beyond safety threshold — possible theft detected",
     timestamp: admin.firestore.FieldValue.serverTimestamp(),
@@ -256,132 +279,215 @@ async function handleData(data, arduinoPort, isMock = false) {
   try {
     await admin.firestore().collection("auto_reports").add(autoReport);
     console.log("✅ Emergency auto-report saved to Firestore");
-
-    // 🔔 Add emergency notification
-    const notification = {
-      number: contactNumber || "N/A",
-      message: "Emergency reported",
-      type: "emergency",
-      date: new Date().toLocaleString(),
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    };
-
-    notificationLogs.push(notification);
-    await admin.firestore().collection("notifications").add(notification);
-    console.log("🔔 Emergency notification saved to Firestore and memory");
   } catch (err) {
-    console.error("❌ Failed to save emergency report or notification:", err.message);
+    console.error("❌ Failed to save emergency auto-report:", err.message);
   }
 
-  if (arduinoPort) arduinoPort.write("BUZZ_ON\n");
+  const notification = {
+    number: contactNumber || "N/A",
+    message: "Emergency reported",
+    type: "emergency",
+    date: new Date().toLocaleString(),
+    timestamp: new Date(),
+  };
 
-  await admin.database().ref("device1/history").push({
-    ...latestArduinoData,
-    status: "emergency",
-    createdAt: admin.database.ServerValue.TIMESTAMP,
-  });
+  notificationLogs.push(notification);
+
+  try {
+    await admin.firestore().collection("notifications").add(notification);
+    console.log("🔔 Emergency notification saved");
+  } catch (err) {
+    console.error("❌ Failed to save emergency notification:", err.message);
+  }
+
+  try {
+    await admin.database().ref("device1/history").push({
+      ...latestArduinoData,
+      status: "emergency",
+      createdAt: admin.database.ServerValue.TIMESTAMP,
+    });
+  } catch (err) {
+    console.error("❌ Failed to push emergency to RTDB history:", err.message);
+  }
 }
 
 // --------------------
-// 🔌 Arduino Setup
+// 🌐 GSM endpoint (Arduino SIM800 posts here)
 // --------------------
-if (USE_ARDUINO) {
-  console.log("🔗 Using REAL Arduino on", ARDUINO_PORT);
-  const arduinoPort = new SerialPort({ path: ARDUINO_PORT, baudRate: BAUD_RATE });
-  const parser = arduinoPort.pipe(new ReadlineParser({ delimiter: "\n" }));
+// If GPS_SECRET is set in env, require header 'x-gps-secret' === GPS_SECRET
+app.post("/api/gps", async (req, res) => {
+  try {
+    if (GPS_SECRET) {
+      const secret = req.header("x-gps-secret");
+      if (!secret || secret !== GPS_SECRET) {
+        return res.status(401).json({ error: "Unauthorized GPS post" });
+      }
+    }
 
-  parser.on("data", async (line) => {
-    line = line.trim();
-    if (!line) return;
+    const { lat, lng, timestamp } = req.body;
+    if (typeof lat === "undefined" || typeof lng === "undefined") {
+      return res.status(400).json({ error: "lat and lng required" });
+    }
 
-    if (!line.startsWith("{") || !line.endsWith("}")) {
-      console.log("ℹ️ System Log:", line);
-      systemLogs.push({ message: line, time: Date.now() });
+    // Accept and process immediately
+    await handleData({ lat: Number(lat), lng: Number(lng), timestamp: timestamp || Date.now() }, "gsm", false);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("❌ /api/gps error:", err);
+    return res.status(500).json({ error: "server error" });
+  }
+});
+
+// --------------------
+// 🧪 Mock functions (global so toggle route can call them)
+// --------------------
+async function setMockHome() {
+  // Wait for police stations to be loaded
+  let tries = 0;
+  while (policeStations.length === 0 && tries < 30) {
+    console.log("⏳ Waiting for police stations to load for mock home...");
+    await new Promise((r) => setTimeout(r, 1000));
+    tries++;
+  }
+  if (policeStations.length === 0) {
+    console.log("⚠️ No police stations available — mock home not set.");
+    return;
+  }
+
+  const base = policeStations[0];
+  if (SYSTEM_ACTIVE) {
+    homeLocation = { lat: base.lat, lng: base.lng };
+    initialReadings = []; // clear any previous calibration readings
+    kalmanLat.x = null;
+    kalmanLng.x = null;
+    console.log("🏠 Mock home location fixed near:", base.name || base.stationName);
+  } else {
+    console.log("⛔ Mock home NOT set — system is OFF.");
+  }
+}
+
+function generateRandomPointNearHome(minDist = 1, maxDist = 30) {
+  if (!homeLocation) return null;
+
+  const distance = minDist + Math.random() * (maxDist - minDist);
+  const angle = Math.random() * 2 * Math.PI;
+  const R = 6371000;
+  const δ = distance / R;
+  const lat1 = (homeLocation.lat * Math.PI) / 180;
+  const lng1 = (homeLocation.lng * Math.PI) / 180;
+
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(δ) +
+      Math.cos(lat1) * Math.sin(δ) * Math.cos(angle)
+  );
+  const lng2 =
+    lng1 +
+    Math.atan2(
+      Math.sin(angle) * Math.sin(δ) * Math.cos(lat1),
+      Math.cos(δ) - Math.sin(lat1) * Math.sin(lat2)
+    );
+
+  return { lat: (lat2 * 180) / Math.PI, lng: (lng2 * 180) / Math.PI };
+}
+
+async function startMockLoop() {
+  if (_mockLoopRunning) return;
+  _mockLoopRunning = true;
+  console.log("✅ Starting mock GPS simulation loop");
+
+  _mockIntervalId = setInterval(async () => {
+    // only generate mock if system active and home set
+    if (!SYSTEM_ACTIVE) {
+      console.log("⛔ Mock skipped — system is OFF.");
+      return;
+    }
+    if (!homeLocation) {
+      console.log("⛔ Mock skipped — home not set yet.");
       return;
     }
 
-    try {
-      const data = JSON.parse(line);
-      await handleData(data, arduinoPort);
-    } catch (err) {
-      console.error("❌ Failed to parse JSON:", line, err.message);
+    const point = generateRandomPointNearHome(1, 20);
+    if (!point) {
+      console.log("⚠️ Mock generation failed — no homeLocation");
+      return;
     }
-  });
 
-  arduinoPort.on("error", (err) => console.error("❌ Serial Port Error:", err.message));
+    console.log(`📍 Generated mock GPS point: (${point.lat.toFixed(5)}, ${point.lng.toFixed(5)})`);
+    await handleData({ lat: point.lat, lng: point.lng, timestamp: Date.now() }, "mock", true);
+  }, MOCK_INTERVAL);
+}
+
+function stopMockLoop() {
+  if (_mockIntervalId) {
+    clearInterval(_mockIntervalId);
+    _mockIntervalId = null;
+    _mockLoopRunning = false;
+    console.log("⛔ Mock loop stopped");
+  }
+}
+
+// Start mock loop if configured to start from boot and system active
+if (USE_MOCK_DATA && SYSTEM_ACTIVE) {
+  setMockHome().then(() => startMockLoop());
 }
 
 // --------------------
-// 🧪 Mock Data Setup
+// ✅ System Toggle route
 // --------------------
-if (USE_MOCK_DATA) {
-  console.log("🧪 Using MOCK DATA near police stations");
+app.post("/api/system/toggle", async (req, res) => {
+  try {
+    const { enabled } = req.body;
+    const wasActive = SYSTEM_ACTIVE;
+    SYSTEM_ACTIVE = !!enabled;
 
-  async function setMockHome() {
-    while (policeStations.length === 0) {
-      console.log("⏳ Waiting for police stations to load...");
-      await new Promise((r) => setTimeout(r, 1000));
+    console.log(`🔒 MotoGuard System is now ${SYSTEM_ACTIVE ? "ACTIVE ✅" : "INACTIVE ⛔"}`);
+
+    if (SYSTEM_ACTIVE && !wasActive) {
+      // When turned ON: reset calibration and optionally start mock loop
+      homeLocation = null;
+      initialReadings = [];
+      kalmanLat.x = null;
+      kalmanLng.x = null;
+      console.log("🏠 Home reset — will be recalibrated now (system activated).");
+
+      if (USE_MOCK_DATA) {
+        await setMockHome();
+        startMockLoop();
+      }
+    } else if (!SYSTEM_ACTIVE && wasActive) {
+      // If turned OFF, stop mock simulation
+      if (USE_MOCK_DATA) {
+        stopMockLoop();
+      }
     }
-    const base = policeStations[0];
-    homeLocation = { lat: base.lat, lng: base.lng };
-    console.log("🏠 Mock home location fixed near:", base.name || base.stationName);
+
+    res.json({ message: `System is now ${SYSTEM_ACTIVE ? "ACTIVE ✅" : "INACTIVE ❌"}`, active: SYSTEM_ACTIVE });
+  } catch (err) {
+    console.error("❌ Toggle error:", err);
+    res.status(500).json({ error: "server error" });
   }
+});
 
-  function generateRandomPointNearHome(minDist = 1, maxDist = 30) {
-    const distance = minDist + Math.random() * (maxDist - minDist);
-    const angle = Math.random() * 2 * Math.PI;
-    const R = 6371000;
-    const δ = distance / R;
-    const lat1 = (homeLocation.lat * Math.PI) / 180;
-    const lng1 = (homeLocation.lng * Math.PI) / 180;
-
-    const lat2 = Math.asin(
-      Math.sin(lat1) * Math.cos(δ) +
-        Math.cos(lat1) * Math.sin(δ) * Math.cos(angle)
-    );
-    const lng2 =
-      lng1 +
-      Math.atan2(
-        Math.sin(angle) * Math.sin(δ) * Math.cos(lat1),
-        Math.cos(δ) - Math.sin(lat1) * Math.sin(lat2)
-      );
-
-    return { lat: (lat2 * 180) / Math.PI, lng: (lng2 * 180) / Math.PI };
-  }
-
-  async function startMockData() {
-    await setMockHome();
-    console.log(`✅ Starting mock simulation near home location`);
-
-    setInterval(async () => {
-      const point = generateRandomPointNearHome(1, 20);
-      const data = { lat: point.lat, lng: point.lng, timestamp: Date.now() };
-      console.log(`📍 Generated mock GPS point: (${point.lat.toFixed(5)}, ${point.lng.toFixed(5)})`);
-      await handleData(data, null, true);
-    }, MOCK_INTERVAL);
-  }
-
-  startMockData();
-}
+// optional system status
+app.get("/api/system/status", (req, res) => {
+  res.json({ active: SYSTEM_ACTIVE, homeLocation, latestArduinoData });
+});
 
 // --------------------
-// 🌐 API Routes
-// --------------------
+// 🌐 Other app routes (users/reports)
 const userRoutes = require("./routes/users");
 const reportRoutes = require("./routes/reportRoutes");
-
 app.use("/api/users", userRoutes);
 app.use("/api/reports", reportRoutes);
 
+// expose diagnostic endpoints
 app.get("/api/arduino", (req, res) => res.json(latestArduinoData));
-app.get("/api/logs", (req, res) => res.json(systemLogs.slice(-20)));
-app.get("/api/notifications", (req, res) => res.json(notificationLogs.slice(-20)));
-app.get("/", (req, res) =>
-  res.send("✅ Backend running + Firebase RTDB + Firestore connected")
-);
+app.get("/api/logs", (req, res) => res.json(systemLogs.slice(-50)));
+app.get("/api/notifications", (req, res) => res.json(notificationLogs.slice(-50)));
+
+app.get("/", (req, res) => res.send("✅ Backend running + Firebase RTDB + Firestore connected"));
 
 // --------------------
 // 🚀 Start Server
-// --------------------
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));

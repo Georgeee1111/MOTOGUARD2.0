@@ -2,7 +2,7 @@ import axios from "axios";
 import { signInWithEmailAndPassword, getIdToken } from "firebase/auth";
 import { firebaseAuth } from "@/firebase/firebaseClient";
 
-const API_BASE_URL = "http://192.168.1.8:5000";
+const API_BASE_URL = "http://192.168.170.40:5000";
 
 const getAuthHeader = async () => {
   const currentUser = firebaseAuth.currentUser;
@@ -163,6 +163,16 @@ export const getLatestReportByStation = async (stationId: string) => {
   const config = await getAuthHeader();
   const response = await axios.get(
     `${API_BASE_URL}/api/reports/latest/${stationId}`,
+    config
+  );
+  return response.data;
+};
+
+export const toggleSystem = async (enabled: boolean) => {
+  const config = await getAuthHeader();
+  const response = await axios.post(
+    `${API_BASE_URL}/api/system/toggle`,
+    { enabled },
     config
   );
   return response.data;

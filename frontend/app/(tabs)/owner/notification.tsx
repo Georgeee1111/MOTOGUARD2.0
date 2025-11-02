@@ -12,11 +12,13 @@ const Notification = () => {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const intervalRef = useRef<number | null>(null); // ✅ Change here
+  const intervalRef = useRef<number | null>(null);
 
   const fetchNotifications = async () => {
     try {
-      const response = await fetch("http://192.168.1.8:5000/api/notifications");
+      const response = await fetch(
+        "http://192.168.170.40:5000/api/notifications"
+      );
       const data = await response.json();
       setNotifications(data);
     } catch (error) {

@@ -14,7 +14,7 @@ import { safePush } from "@/utils/navigation";
 import { NavItemProps } from "@/interfaces/routes/Navigation";
 import { firebaseAuth, db } from "@/firebase/firebaseClient";
 import { doc, getDoc } from "firebase/firestore";
-
+import { toggleSystem } from "@/lib/api";
 interface TopNavProps {
   title: string;
   navItems: NavItemProps[];
@@ -27,6 +27,9 @@ export const TopNav: React.FC<TopNavProps> = ({ title, navItems }) => {
   ).current;
 
   const router = useRouter();
+
+  // ✅ System toggle state
+  const [systemEnabled, setSystemEnabled] = useState<boolean>(false);
 
   // User state
   const [userName, setUserName] = useState<string>("");
@@ -120,7 +123,7 @@ export const TopNav: React.FC<TopNavProps> = ({ title, navItems }) => {
             top: 0,
             bottom: 0,
             width: Dimensions.get("window").width * 0.7,
-            backgroundColor: "#FFFFFF", // White background
+            backgroundColor: "#FFFFFF",
             paddingTop: 60,
             paddingHorizontal: 20,
             transform: [{ translateX: slideAnim }],
@@ -134,7 +137,7 @@ export const TopNav: React.FC<TopNavProps> = ({ title, navItems }) => {
             <Text className="text-gray-700">{userEmail}</Text>
           </View>
 
-          {/* Menu Items */}
+          {/* Edit Profile */}
           <TouchableOpacity
             className="flex-row items-center mb-6"
             onPress={handleEditProfile}
@@ -143,6 +146,7 @@ export const TopNav: React.FC<TopNavProps> = ({ title, navItems }) => {
             <Text className="text-black text-base ml-4">Edit Profile</Text>
           </TouchableOpacity>
 
+          {/* Police Station */}
           <TouchableOpacity
             className="flex-row items-center mb-6"
             onPress={() => {
@@ -154,10 +158,37 @@ export const TopNav: React.FC<TopNavProps> = ({ title, navItems }) => {
             <Text className="text-black text-base ml-4">Police Station</Text>
           </TouchableOpacity>
 
+          {/* ✅ NEW: MotoGuard On / Off Button */}
+          <TouchableOpacity
+            className="flex-row items-center mb-6"
+            onPress={async () => {
+              try {
+                const newState = !systemEnabled;
+                setSystemEnabled(newState);
+
+                const result = await toggleSystem(newState);
+                console.log("Toggle result:", result.message);
+
+                toggleModal();
+              } catch (error) {
+                console.log("Toggle error:", error);
+              }
+            }}
+          >
+            <Ionicons
+              name={systemEnabled ? "lock-open-outline" : "lock-closed-outline"}
+              size={24}
+              color={systemEnabled ? "green" : "red"}
+            />
+            <Text className="text-black text-base ml-4">
+              {systemEnabled ? "System Active" : "System Inactive"}
+            </Text>
+          </TouchableOpacity>
+
           {/* Spacer */}
           <View className="flex-1" />
 
-          {/* Logout Button */}
+          {/* Logout */}
           <TouchableOpacity className="flex-row items-center mb-10">
             <Ionicons name="log-out-outline" size={24} color="#FF4D4D" />
             <Text className="text-red-500 text-base ml-4">Logout</Text>

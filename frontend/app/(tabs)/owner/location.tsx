@@ -17,7 +17,7 @@ const LocationScreen = () => {
   useEffect(() => {
     const fetchArduinoData = async () => {
       try {
-        const res = await fetch("http://192.168.1.8:5000/api/arduino");
+        const res = await fetch("http://192.168.170.40:5000/api/arduino");
         const data: ArduinoData = await res.json();
         if (data.lat != null && data.lng != null) {
           setArduinoData(data);
