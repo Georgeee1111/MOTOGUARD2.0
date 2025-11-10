@@ -12,13 +12,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.enable("trust proxy");
-app.use((req, res, next) => {
-  if (req.headers["x-forwarded-proto"] === "https") {
-    return res.redirect("http://" + req.headers.host + req.url);
-  }
-  next();
-});
+// app.enable("trust proxy");
+// app.use((req, res, next) => {
+//   if (req.headers["x-forwarded-proto"] === "https") {
+//     return res.redirect("http://" + req.headers.host + req.url);
+//   }
+//   next();
+// });
 
 // --------------------
 // ⚙️ Configuration
