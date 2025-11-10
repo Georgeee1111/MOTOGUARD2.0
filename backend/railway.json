@@ -1,0 +1,12 @@
+{
+  "build": {
+    "builder": "RAILPACK"
+  },
+  "start": {
+    "command": "npm run start"
+  },
+  "install": {
+    "command": "npm install"
+  },
+  "root": "."
+}
