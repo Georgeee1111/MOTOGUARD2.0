@@ -12,14 +12,13 @@ exports.sendReport = async (req, res) => {
     location,
     plate,
     brand,
-    toEmail,
+    toContactNumber, // receiver
     receiverRole,
     description,
     additionalInfo,
   } = req.body;
 
   const uid = req.user?.uid;
-  const ownerEmail = req.user?.email;
 
   if (
     !owner ||
@@ -29,39 +28,43 @@ exports.sendReport = async (req, res) => {
     !location ||
     !plate ||
     !brand ||
-    !toEmail ||
+    !toContactNumber ||
     !receiverRole
   ) {
-    return res.status(400).json({ error: "All required fields are mandatory." });
+    return res
+      .status(400)
+      .json({ error: "All required fields are mandatory." });
   }
 
-  if (!uid || !ownerEmail) {
-    return res
-      .status(401)
-      .json({ error: "Unauthorized. User details missing." });
+  if (!uid) {
+    return res.status(401).json({
+      error: "Unauthorized. User not authenticated.",
+    });
   }
 
   try {
     const newReport = {
       owner,
-      ownerEmail,
-      senderUid: uid,
+      senderUid: uid, // Use UID instead of contactNumber
       phone,
       date,
       time,
       location,
       plate,
       brand,
-      toEmail: toEmail.toLowerCase(),
+      toContactNumber,
       receiverRole,
       description: description || "",
       additionalInfo: additionalInfo || "",
-      status: "unread", 
-      archived: false,  
+      status: "unread",
+      archived: false,
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
     };
 
-    const docRef = await admin.firestore().collection("reports").add(newReport);
+    const docRef = await admin
+      .firestore()
+      .collection("reports")
+      .add(newReport);
 
     return res.status(201).json({ id: docRef.id, ...newReport });
   } catch (error) {
@@ -75,16 +78,18 @@ exports.sendReport = async (req, res) => {
 // ===============================
 exports.getSentReports = async (req, res) => {
   try {
-    const ownerEmail = req.user?.email;
+    const uid = req.user?.uid;
 
-    if (!ownerEmail) {
-      return res.status(401).json({ error: "Unauthorized. User email missing." });
+    if (!uid) {
+      return res.status(401).json({
+        error: "Unauthorized. User not authenticated.",
+      });
     }
 
     const snapshot = await admin
       .firestore()
       .collection("reports")
-      .where("ownerEmail", "==", ownerEmail)
+      .where("senderUid", "==", uid) // Query by UID
       .orderBy("timestamp", "desc")
       .get();
 
@@ -112,16 +117,19 @@ exports.getSentReports = async (req, res) => {
 // ===============================
 exports.getUnreadReports = async (req, res) => {
   try {
-    const userEmail = req.user?.email?.toLowerCase();
-    if (!userEmail) {
-      return res.status(401).json({ error: "Unauthorized. No user email." });
+    const uid = req.user?.uid;
+
+    if (!uid) {
+      return res
+        .status(401)
+        .json({ error: "Unauthorized. User not authenticated." });
     }
 
     const snapshot = await admin
       .firestore()
       .collection("reports")
-      .where("toEmail", "==", userEmail) // only for this station
-      .where("status", "==", "unread")   // only unread
+      .where("toContactNumber", "==", uid) // Optional: if receiver is UID
+      .where("status", "==", "unread")
       .orderBy("timestamp", "desc")
       .get();
 
@@ -160,7 +168,9 @@ exports.acceptReport = async (req, res) => {
       acceptedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    return res.status(200).json({ message: "Report accepted successfully" });
+    return res
+      .status(200)
+      .json({ message: "Report accepted successfully" });
   } catch (error) {
     console.error("🔥 Error accepting report:", error.message);
     return res.status(500).json({ error: "Failed to accept report" });
@@ -168,14 +178,16 @@ exports.acceptReport = async (req, res) => {
 };
 
 // ===============================
-// Police: Update Report Status 
+// Police: Update Report Status
 // ===============================
 exports.updateReportStatus = async (req, res) => {
   const { reportId } = req.params;
-  const { status } = req.body; 
+  const { status } = req.body;
 
   if (!reportId || !status) {
-    return res.status(400).json({ error: "Report ID and status are required" });
+    return res.status(400).json({
+      error: "Report ID and status are required",
+    });
   }
 
   try {
@@ -191,7 +203,9 @@ exports.updateReportStatus = async (req, res) => {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    return res.status(200).json({ message: `Report status updated to ${status}` });
+    return res
+      .status(200)
+      .json({ message: `Report status updated to ${status}` });
   } catch (error) {
     console.error("🔥 Error updating report status:", error.message);
     return res.status(500).json({ error: "Failed to update report status" });
@@ -221,7 +235,9 @@ exports.archiveReport = async (req, res) => {
       archivedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    return res.status(200).json({ message: "Report archived successfully" });
+    return res
+      .status(200)
+      .json({ message: "Report archived successfully" });
   } catch (error) {
     console.error("🔥 Error archiving report:", error.message);
     return res.status(500).json({ error: "Failed to archive report" });
