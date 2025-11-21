@@ -2,9 +2,18 @@ const admin = require("../../config/firebase");
 
 exports.getReceivedReports = async (req, res) => {
   const { role } = req.query;
+  const uid = req.user?.uid; 
+
+  if (!uid) {
+    return res.status(401).json({
+      error: "Unauthorized. User not authenticated.",
+    });
+  }
 
   if (!role) {
-    return res.status(400).json({ error: "Missing role query parameter" });
+    return res.status(400).json({
+      error: "Missing role query parameter",
+    });
   }
 
   try {
@@ -12,6 +21,7 @@ exports.getReceivedReports = async (req, res) => {
       .firestore()
       .collection("reports")
       .where("receiverRole", "==", role)
+      .where("toContactNumber", "==", uid) 
       .orderBy("timestamp", "desc")
       .get();
 
@@ -20,8 +30,13 @@ exports.getReceivedReports = async (req, res) => {
       ...doc.data(),
     }));
 
-    res.status(200).json(reports);
+    return res.status(200).json(reports);
   } catch (error) {
-    res.status(500).json({ error: "Failed to fetch reports", details: error.message });
+    console.error("🔥 Error fetching received reports:", error.message);
+
+    return res.status(500).json({
+      error: "Failed to fetch reports",
+      details: error.message,
+    });
   }
 };
