@@ -488,6 +488,32 @@ const reportRoutes = require("./routes/reportRoutes");
 app.use("/api/users", userRoutes);
 app.use("/api/reports", reportRoutes);
 
+// --------------------
+// 📌 API to receive logs from Arduino
+// --------------------
+app.post("/api/logs", (req, res) => {
+  const { message } = req.body;
+
+  if (!message) {
+    return res.status(400).json({ error: "Log message is required" });
+  }
+
+  systemLogs.push({
+    message,
+    timestamp: new Date().toISOString(),
+    source: "arduino",
+  });
+
+  if (systemLogs.length > 200) {
+    systemLogs.shift();
+  }
+
+  console.log("📥 Arduino Log:", message);
+
+  return res.json({ status: "ok" });
+});
+
+
 // expose diagnostic endpoints
 app.get("/api/arduino", (req, res) => res.json(latestArduinoData));
 app.get("/api/logs", (req, res) => res.json(systemLogs.slice(-50)));
