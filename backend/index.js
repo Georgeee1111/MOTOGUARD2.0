@@ -252,47 +252,116 @@ async function handleData(data, source = "gsm", isMock = false) {
   latestArduinoData = { lat, lng, motion: !!data.motion, timestamp: data.timestamp ?? Date.now(), distance: distanceFromHome, moved, source };
   logInfo("Processed GPS", "gps", { lat, lng, distanceFromHome, moved, source });
 
-  // Warning and emergency handling (same as previous MQTT code)
-  if (distanceFromHome < 11) {
-    emergencyActive = false;
-    try { await admin.database().ref("device1/history").push({ ...latestArduinoData, status: "normal", createdAt: admin.database.ServerValue.TIMESTAMP }); } catch (e) { logWarn("RTDB push failed (normal)", "firebase", { error: e.message }); }
-    return;
+  // Warning and emergency handling
+if (distanceFromHome < 11) {
+  // Close to home — normal
+  emergencyActive = false;
+  try {
+    await admin.database().ref("device1/history").push({
+      ...latestArduinoData,
+      status: "normal",
+      createdAt: admin.database.ServerValue.TIMESTAMP
+    });
+  } catch (e) {
+    logWarn("RTDB push failed (normal)", "firebase", { error: e.message });
   }
+  return;
+}
 
-  const nearest = getNearestStation(lat, lng, policeStations, 100);
-  if (distanceFromHome >= 11 && distanceFromHome < DISTANCE_THRESHOLD) {
-    const warningData = {
-      lat, lng, distance: distanceFromHome, type: "warning", message: "Warning Alert",
-      station_id: nearest?.id ?? null, station_name: nearest?.name ?? nearest?.stationName ?? null,
-      timestamp: admin.firestore.FieldValue.serverTimestamp()
-    };
-    try { await admin.firestore().collection("notifications").add(warningData); } catch (e) { logWarn("Firestore add notifications failed", "firestore", { error: e.message }); }
-    notificationLogs.push({ number: nearest?.contact_number ?? nearest?.contactNumber ?? "N/A", message: "Warning Alert", type: "warning", date: new Date().toLocaleString(), timestamp: new Date() });
-    try { await admin.database().ref("device1/history").push({ ...latestArduinoData, status: "warning", createdAt: admin.database.ServerValue.TIMESTAMP }); } catch (e) { logWarn("RTDB push failed (warning)", "firebase", { error: e.message }); }
-    return;
-  }
+// Determine nearest police station (may be null)
+const nearest = getNearestStation(lat, lng, policeStations, 100);
 
-  if (!nearest) return;
-
-  const now = Date.now();
-  if (lastReports[nearest.id] && now - lastReports[nearest.id] < REPORT_COOLDOWN_MS) return;
-  lastReports[nearest.id] = now;
-
-  emergencyActive = true;
-  const autoReport = {
-    station_id: nearest.id,
-    station_name: nearest.name ?? nearest.stationName ?? "Unknown",
-    lat, lng, distance: nearest.distance,
-    contact_number: nearest.contact_number ?? nearest.contactNumber ?? null,
-    source, status: "emergency",
-    message: "Vehicle moved beyond safety threshold — possible theft detected",
+// Warning: distance moderately far from home
+if (distanceFromHome >= 11 && distanceFromHome < DISTANCE_THRESHOLD) {
+  const warningData = {
+    lat,
+    lng,
+    distance: distanceFromHome,
+    type: "warning",
+    message: "Warning Alert",
+    station_id: nearest?.id ?? null,
+    station_name: nearest?.name ?? nearest?.stationName ?? null,
     timestamp: admin.firestore.FieldValue.serverTimestamp()
   };
-  try { await admin.firestore().collection("auto_reports").add(autoReport); } catch (e) { logWarn("Firestore add auto_reports failed", "firestore", { error: e.message }); }
-  notificationLogs.push({ number: nearest?.contact_number ?? "N/A", message: "Emergency reported", type: "emergency", date: new Date().toLocaleString(), timestamp: new Date() });
-  try { await admin.database().ref("device1/history").push({ ...latestArduinoData, status: "emergency", createdAt: admin.database.ServerValue.TIMESTAMP }); } catch (e) { logWarn("RTDB push failed (emergency)", "firebase", { error: e.message }); }
-  logInfo("Emergency reported", "auto_report", { nearest, latestArduinoData });
+
+  try {
+    await admin.firestore().collection("notifications").add(warningData);
+  } catch (e) {
+    logWarn("Firestore add notifications failed", "firestore", { error: e.message });
+  }
+
+  notificationLogs.push({
+    number: nearest?.contact_number ?? nearest?.contactNumber ?? "N/A",
+    message: "Warning Alert",
+    type: "warning",
+    date: new Date().toLocaleString(),
+    timestamp: new Date()
+  });
+
+  try {
+    await admin.database().ref("device1/history").push({
+      ...latestArduinoData,
+      status: "warning",
+      createdAt: admin.database.ServerValue.TIMESTAMP
+    });
+  } catch (e) {
+    logWarn("RTDB push failed (warning)", "firebase", { error: e.message });
+  }
+
+  return;
 }
+
+// Emergency: distance exceeds threshold
+const now = Date.now();
+
+// If there’s a station, apply cooldown
+if (nearest?.id && lastReports[nearest.id] && now - lastReports[nearest.id] < REPORT_COOLDOWN_MS) return;
+if (nearest?.id) lastReports[nearest.id] = now;
+
+emergencyActive = true;
+
+const autoReport = {
+  station_id: nearest?.id ?? null,
+  station_name: nearest?.name ?? nearest?.stationName ?? "Unknown",
+  lat,
+  lng,
+  distance: distanceFromHome,
+  contact_number: nearest?.contact_number ?? nearest?.contactNumber ?? null,
+  source,
+  status: "emergency",
+  message: "Vehicle moved beyond safety threshold — possible theft detected",
+  timestamp: admin.firestore.FieldValue.serverTimestamp()
+};
+
+try {
+  await admin.firestore().collection("auto_reports").add(autoReport);
+} catch (e) {
+  logWarn("Firestore add auto_reports failed", "firestore", { error: e.message });
+}
+
+// Always push to notification logs for modal display, even if no station
+notificationLogs.push({
+  number: nearest?.contact_number ?? "N/A",
+  message: "Emergency reported",
+  type: "emergency",
+  date: new Date().toLocaleString(),
+  timestamp: new Date(),
+  lat,
+  lng,
+  distance: distanceFromHome
+});
+
+try {
+  await admin.database().ref("device1/history").push({
+    ...latestArduinoData,
+    status: "emergency",
+    createdAt: admin.database.ServerValue.TIMESTAMP
+  });
+} catch (e) {
+  logWarn("RTDB push failed (emergency)", "firebase", { error: e.message });
+}
+
+logInfo("Emergency reported", "auto_report", { nearest, latestArduinoData });
 
 // ==========================
 // 🌐 HTTP endpoints
