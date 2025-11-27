@@ -362,6 +362,7 @@ try {
 }
 
 logInfo("Emergency reported", "auto_report", { nearest, latestArduinoData });
+}
 
 // ==========================
 // 🌐 HTTP endpoints
