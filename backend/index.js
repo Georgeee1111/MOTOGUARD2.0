@@ -1,5 +1,4 @@
 // index.js — MotoGuard backend (Express + Firebase + MQTT)
-
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
@@ -26,7 +25,6 @@ const REPORT_COOLDOWN_MS = 60 * 1000;
 const MQTT_BROKER = process.env.MQTT_BROKER || "mqtts://cee1784455524214820f3387732533d6.s1.eu.hivemq.cloud:8883";
 const MQTT_USER = process.env.MQTT_USER || "Kazuki";
 const MQTT_PASSWORD = process.env.MQTT_PASSWORD || "Nazuna12";
-const DEVICE_TOPIC_PREFIX = "esp32_";
 
 // ==========================
 // ✅ Runtime state
@@ -47,12 +45,14 @@ const lastReports = {}; // per-station cooldown
 async function loadPoliceStations() {
   try {
     const snapshot = await admin.firestore().collection("police_stations").get();
-    policeStations = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      lat: doc.data().position?.latitude ?? null,
-      lng: doc.data().position?.longitude ?? null
-    })).filter(s => s.lat !== null && s.lng !== null);
+    policeStations = snapshot.docs
+      .map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        lat: doc.data().position?.latitude ?? null,
+        lng: doc.data().position?.longitude ?? null
+      }))
+      .filter(s => s.lat !== null && s.lng !== null);
 
     console.log(`🚓 Loaded ${policeStations.length} police stations`);
   } catch (err) {
@@ -104,7 +104,7 @@ function getNearestStation(lat, lng, stations, maxDistance = 100) {
 }
 
 // ==========================
-// 🛠 Core handler for GPS
+// 🛠 Core GPS handler
 // ==========================
 async function handleData(data, source = "gsm") {
   if (typeof data.lat === "undefined" || typeof data.lng === "undefined") return;
@@ -128,7 +128,7 @@ async function handleData(data, source = "gsm") {
       kalmanLat.x = null; kalmanLng.x = null;
       console.log("✅ Home location established:", homeLocation);
     } else {
-      latestArduinoData = { lat: data.lat, lng: data.lng, motion: !!data.motion, timestamp: data.timestamp ?? Date.now(), system: "calibrating" };
+      latestArduinoData = { ...data, system: "calibrating" };
       return;
     }
   }
@@ -220,30 +220,39 @@ app.get("/health", (req, res) => res.json({ ok: true, ts: Date.now() }));
 // ==========================
 // 📡 MQTT integration
 // ==========================
-const mqttClient = mqtt.connect(MQTT_BROKER, {
-  username: MQTT_USER,
-  password: MQTT_PASSWORD
-});
+const mqttClient = mqtt.connect(MQTT_BROKER, { username: MQTT_USER, password: MQTT_PASSWORD });
 
 mqttClient.on("connect", () => {
   console.log("✅ Connected to MQTT broker");
-  // Subscribe exact topics for reliability
-  mqttClient.subscribe("esp32_+/gps");
-  mqttClient.subscribe("esp32_+/logs");
+  mqttClient.subscribe("esp32_+/gps", err => { if (err) console.error("❌ Subscribe GPS failed:", err); });
+  mqttClient.subscribe("esp32_+/logs", err => { if (err) console.error("❌ Subscribe LOG failed:", err); });
 });
 
 mqttClient.on("message", async (topic, msgBuffer) => {
-  const msg = msgBuffer.toString();
+  const rawMsg = msgBuffer.toString();
+  console.log(`📨 Raw MQTT message on ${topic}: ${rawMsg}`);
+
   try {
-    const payload = JSON.parse(msg);
-    if (topic.endsWith("/gps")) await handleData({ lat: Number(payload.lat), lng: Number(payload.lng), motion: !!payload.motion, timestamp: payload.timestamp ?? Date.now() }, "mqtt");
+    const payload = JSON.parse(rawMsg);
+
+    if (topic.endsWith("/gps")) {
+      await handleData({
+        lat: Number(payload.lat),
+        lng: Number(payload.lng),
+        motion: !!payload.motion,
+        timestamp: payload.timestamp ?? Date.now()
+      }, "mqtt");
+    }
+
     if (topic.endsWith("/logs")) {
-      const log = { message: payload.message ?? msg, timestamp: new Date().toISOString(), source: "mqtt" };
+      const log = { message: payload.message ?? rawMsg, timestamp: new Date().toISOString(), source: "mqtt" };
       systemLogs.push(log);
       if (systemLogs.length > 200) systemLogs.shift();
       console.log("📥 MQTT Log:", log.message);
     }
-  } catch (err) { console.error("❌ MQTT handling failed:", err); }
+  } catch (err) {
+    console.error("❌ MQTT JSON parse error:", err, rawMsg);
+  }
 });
 
 // ==========================
