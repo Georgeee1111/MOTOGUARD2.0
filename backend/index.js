@@ -236,6 +236,14 @@ app.get("/api/system/status", (req,res) => res.json({ active: SYSTEM_ACTIVE, hom
 app.get("/", (req,res) => res.send("✅ Backend running + Firebase RTDB + Firestore connected"));
 
 // --------------------
+// 📂 User & Report Routes
+// --------------------
+const userRoutes = require("./routes/users");
+const reportRoutes = require("./routes/reportRoutes");
+app.use("/api/users", userRoutes);
+app.use("/api/reports", reportRoutes);
+
+// --------------------
 // 📡 MQTT integration
 // --------------------
 const mqttClient = mqtt.connect(MQTT_BROKER, { username: MQTT_USER, password: MQTT_PASSWORD, reconnectPeriod:5000, connectTimeout:30000 });
