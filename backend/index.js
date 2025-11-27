@@ -282,22 +282,60 @@ app.use("/api/users", userRoutes);
 app.use("/api/reports", reportRoutes);
 
 // --------------------
-// 📡 MQTT integration
+// 📡 MQTT integration — unified logging like old backend
 // --------------------
-const mqttClient = mqtt.connect(MQTT_BROKER, { username: MQTT_USER, password: MQTT_PASSWORD, reconnectPeriod:5000, connectTimeout:30000 });
+const mqttClient = mqtt.connect(MQTT_BROKER, {
+  username: MQTT_USER,
+  password: MQTT_PASSWORD,
+  reconnectPeriod: 5000,
+  connectTimeout: 30000
+});
+
 mqttClient.on("connect", () => {
   logInfo("Connected to MQTT broker", "mqtt");
-  for(const deviceId of DEVICES){
-    mqttClient.subscribe(`${deviceId}/gps`, err=> err ? logError(err.message,"mqtt") : logInfo(`Subscribed to ${deviceId}/gps`));
-    mqttClient.subscribe(`${deviceId}/logs`, err=> err ? logError(err.message,"mqtt") : logInfo(`Subscribed to ${deviceId}/logs`));
+  for (const deviceId of DEVICES) {
+    mqttClient.subscribe(`${deviceId}/gps`, err => err ? logError(err.message,"mqtt") : logInfo(`Subscribed to ${deviceId}/gps`));
+    mqttClient.subscribe(`${deviceId}/logs`, err => err ? logError(err.message,"mqtt") : logInfo(`Subscribed to ${deviceId}/logs`));
   }
 });
-mqttClient.on("message", async (topic,msgBuffer) => {
+
+mqttClient.on("reconnect", () => logInfo("MQTT reconnecting...", "mqtt"));
+mqttClient.on("close", () => logWarn("MQTT connection closed", "mqtt"));
+mqttClient.on("error", err => logError(`MQTT client error: ${err.message ?? err}`, "mqtt"));
+
+// Handle incoming messages
+mqttClient.on("message", async (topic, msgBuffer) => {
   const rawMsg = msgBuffer.toString();
-  logInfo("Raw MQTT message", "mqtt_raw",{topic,rawMsg});
-  let parsed=null; try{ parsed=JSON.parse(rawMsg);} catch{}
-  if(topic.endsWith("/gps") && parsed?.lat && parsed?.lng){ await handleData({ lat:Number(parsed.lat), lng:Number(parsed.lng), timestamp: parsed.timestamp ?? Date.now() }, "mqtt", false);}
-  else if(topic.endsWith("/logs")){ logSystem(parsed?.message ?? rawMsg, "mqtt", parsed ?? { raw: rawMsg }); }
+  logInfo("Raw MQTT message received", "mqtt_raw", { topic, rawMsg });
+
+  let parsed = null;
+  try { parsed = JSON.parse(rawMsg); } catch { parsed = null; }
+
+  try {
+    if (topic.endsWith("/gps")) {
+      // JSON GPS message
+      if (parsed && typeof parsed.lat !== "undefined" && typeof parsed.lng !== "undefined") {
+        await handleData({
+          lat: Number(parsed.lat),
+          lng: Number(parsed.lng),
+          motion: typeof parsed.motion !== "undefined" ? !!parsed.motion : undefined,
+          timestamp: parsed.timestamp ?? Date.now()
+        }, "mqtt", false);
+      } else {
+        // Plain-text GPS message (e.g., "GPS searching...")
+        logInfo("Non-JSON GPS message", "mqtt_gps", { topic, rawMsg });
+      }
+    } else if (topic.endsWith("/logs")) {
+      // Store MQTT log like old backend
+      const logEntry = logSystem(parsed?.message ?? rawMsg, "mqtt", parsed ?? { raw: rawMsg });
+      logInfo("Stored MQTT log", "mqtt", { topic, logEntry });
+    } else {
+      // Unknown topic
+      logInfo("Unhandled MQTT topic", "mqtt", { topic, rawMsg });
+    }
+  } catch (err) {
+    logError(`Error processing MQTT message: ${err.message ?? err}`, "mqtt_processing");
+  }
 });
 
 // --------------------
