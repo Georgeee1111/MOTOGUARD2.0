@@ -319,29 +319,37 @@ mqttClient.on("message", async (topic, msgBuffer) => {
   try { parsed = JSON.parse(rawMsg); } catch {}
 
   if (topic.endsWith("/gps")) {
-    // Always log the GPS message in Render backend
-    if (parsed && typeof parsed.lat !== "undefined" && typeof parsed.lng !== "undefined") {
-      logInfo("GPS message", "mqtt_gps", { topic, ...parsed });
-      // Also call handleData to keep your distance/emergency logic intact
-      await handleData({
-        lat: Number(parsed.lat),
-        lng: Number(parsed.lng),
-        motion: typeof parsed.motion !== "undefined" ? !!parsed.motion : undefined,
-        timestamp: parsed.timestamp ?? Date.now()
-      }, "mqtt", false);
+    if (parsed) {
+      // Try multiple key names for latitude/longitude
+      const lat = parsed.lat ?? parsed.latitude ?? parsed.Lat ?? parsed.LAT;
+      const lng = parsed.lng ?? parsed.longitude ?? parsed.Lng ?? parsed.LNG;
+
+      if (lat !== undefined && lng !== undefined) {
+        logInfo("📍 GPS message received", "mqtt_gps", { topic, lat, lng, raw: rawMsg });
+        await handleData({
+          lat: Number(lat),
+          lng: Number(lng),
+          motion: typeof parsed.motion !== "undefined" ? !!parsed.motion : undefined,
+          timestamp: parsed.timestamp ?? Date.now()
+        }, "mqtt", false);
+      } else {
+        logWarn("GPS keys missing", "mqtt_gps", { topic, rawMsg });
+      }
     } else {
-      // Non-JSON or incomplete GPS data
-      logWarn("Non-JSON or incomplete GPS message", "mqtt_gps", { topic, rawMsg });
+      logWarn("Failed to parse GPS JSON", "mqtt_gps", { topic, rawMsg });
     }
+
   } else if (topic.endsWith("/logs")) {
     // Always log any device log in Render backend
     const messageToStore = parsed?.message ?? rawMsg;
     logInfo("Device log", "mqtt_log", { topic, message: messageToStore, raw: rawMsg });
+
   } else {
     // Unknown topic
     logInfo("Unhandled MQTT topic", "mqtt", { topic, rawMsg });
   }
 });
+
 
 // --------------------
 // 🚀 Start server
