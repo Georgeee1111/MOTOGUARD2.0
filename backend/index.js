@@ -220,20 +220,34 @@ app.get("/health", (req, res) => res.json({ ok: true, ts: Date.now() }));
 // ==========================
 // 📡 MQTT integration
 // ==========================
-const mqttClient = mqtt.connect(MQTT_BROKER, { username: MQTT_USER, password: MQTT_PASSWORD });
+const mqttClient = mqtt.connect(MQTT_BROKER, {
+  username: MQTT_USER,
+  password: MQTT_PASSWORD
+});
 
 mqttClient.on("connect", () => {
   console.log("✅ Connected to MQTT broker");
-  mqttClient.subscribe("esp32_+/gps", err => { if (err) console.error("❌ Subscribe GPS failed:", err); });
-  mqttClient.subscribe("esp32_+/logs", err => { if (err) console.error("❌ Subscribe LOG failed:", err); });
+
+  // Subscribe to each ESP32 device topic explicitly
+  const deviceId = "esp32_01"; // Change per device if needed
+  const gpsTopic = `${deviceId}/gps`;
+  const logTopic = `${deviceId}/logs`;
+
+  mqttClient.subscribe(gpsTopic, (err) => {
+    if (err) console.error("❌ Subscribe GPS failed:", err);
+    else console.log(`✅ Subscribed to GPS topic: ${gpsTopic}`);
+  });
+
+  mqttClient.subscribe(logTopic, (err) => {
+    if (err) console.error("❌ Subscribe LOG failed:", err);
+    else console.log(`✅ Subscribed to LOG topic: ${logTopic}`);
+  });
 });
 
 mqttClient.on("message", async (topic, msgBuffer) => {
-  const rawMsg = msgBuffer.toString();
-  console.log(`📨 Raw MQTT message on ${topic}: ${rawMsg}`);
-
+  const msg = msgBuffer.toString();
   try {
-    const payload = JSON.parse(rawMsg);
+    const payload = JSON.parse(msg);
 
     if (topic.endsWith("/gps")) {
       await handleData({
@@ -245,13 +259,14 @@ mqttClient.on("message", async (topic, msgBuffer) => {
     }
 
     if (topic.endsWith("/logs")) {
-      const log = { message: payload.message ?? rawMsg, timestamp: new Date().toISOString(), source: "mqtt" };
+      const log = { message: payload.message ?? msg, timestamp: new Date().toISOString(), source: "mqtt" };
       systemLogs.push(log);
       if (systemLogs.length > 200) systemLogs.shift();
       console.log("📥 MQTT Log:", log.message);
     }
+
   } catch (err) {
-    console.error("❌ MQTT JSON parse error:", err, rawMsg);
+    console.error("❌ MQTT handling failed:", err);
   }
 });
 
