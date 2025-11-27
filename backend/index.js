@@ -209,6 +209,44 @@ async function handleData(data, source = "gsm", isMock = false) {
 }
 
 // --------------------
+// ✅ System Toggle route
+// --------------------
+app.post("/api/system/toggle", async (req, res) => {
+  try {
+    const { enabled } = req.body;
+    const wasActive = SYSTEM_ACTIVE;
+    SYSTEM_ACTIVE = !!enabled;
+
+    console.log(`🔒 MotoGuard System is now ${SYSTEM_ACTIVE ? "ACTIVE ✅" : "INACTIVE ⛔"}`);
+
+    if (SYSTEM_ACTIVE && !wasActive) {
+      // When turned ON: reset calibration and optionally start mock loop
+      homeLocation = null;
+      initialReadings = [];
+      kalmanLat.x = null;
+      kalmanLng.x = null;
+      console.log("🏠 Home reset — will be recalibrated now (system activated).");
+
+      if (USE_MOCK_DATA) {
+        await setMockHome();
+        startMockLoop();
+      }
+    } else if (!SYSTEM_ACTIVE && wasActive) {
+      // If turned OFF, stop mock simulation
+      if (USE_MOCK_DATA) {
+        stopMockLoop();
+      }
+    }
+
+    res.json({ message: `System is now ${SYSTEM_ACTIVE ? "ACTIVE ✅" : "INACTIVE ❌"}`, active: SYSTEM_ACTIVE });
+  } catch (err) {
+    console.error("❌ Toggle error:", err);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+
+// --------------------
 // 🌐 HTTP endpoints
 // --------------------
 app.post("/api/gps", async (req,res) => {
