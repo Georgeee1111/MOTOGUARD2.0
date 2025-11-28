@@ -117,18 +117,16 @@ exports.getSentReports = async (req, res) => {
 // ===============================
 exports.getUnreadReports = async (req, res) => {
   try {
-    const uid = req.user?.uid;
+    const { contactNumber } = req.query;
 
-    if (!uid) {
-      return res
-        .status(401)
-        .json({ error: "Unauthorized. User not authenticated." });
+    if (!contactNumber) {
+      return res.status(400).json({ error: "Contact number is required" });
     }
 
     const snapshot = await admin
       .firestore()
       .collection("reports")
-      .where("toContactNumber", "==", uid) // Optional: if receiver is UID
+      .where("toContactNumber", "==", contactNumber)
       .where("status", "==", "unread")
       .orderBy("timestamp", "desc")
       .get();
@@ -144,6 +142,7 @@ exports.getUnreadReports = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch unread reports" });
   }
 };
+
 
 // ===============================
 // Police: Accept a Report (Unread → Pending)
