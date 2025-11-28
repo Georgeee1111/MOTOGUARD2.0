@@ -50,3 +50,31 @@ exports.getUserProfile = async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+// ----------------------------
+// 🔹 Check if a contact number belongs to a police user
+// ----------------------------
+exports.getUserByContactNumber = async (req, res) => {
+  const { contactNumber } = req.query;
+
+  if (!contactNumber) {
+    return res.status(400).json({ error: "Contact number is required" });
+  }
+
+  try {
+    const userQuery = await admin.firestore()
+      .collection("users")
+      .where("contactNumber", "==", contactNumber)
+      .limit(1)
+      .get();
+
+    if (userQuery.empty) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const userData = userQuery.docs[0].data();
+    return res.status(200).json({ id: userQuery.docs[0].id, ...userData });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
