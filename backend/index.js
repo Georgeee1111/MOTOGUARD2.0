@@ -429,6 +429,8 @@ mqttClient.on("message", async (topic, msgBuffer) => {
   } catch (err) { logError(`Error processing MQTT message: ${err.message ?? err}`, "mqtt_processing"); }
 });
 
+}
+
 // ==========================
 // 🚀 Start server
 // ==========================
