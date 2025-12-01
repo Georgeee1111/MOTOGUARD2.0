@@ -104,3 +104,26 @@ exports.updateUserProfile = async (req, res) => {
     return res.status(400).json({ error: error.message });
   }
 };
+
+exports.updateUserLocation = async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const { lat, lng } = req.body;
+
+    if (!lat || !lng) {
+      return res.status(400).json({ message: "Latitude and longitude required" });
+    }
+
+    // Store/update in Firestore
+    await admin.firestore().collection("userLocations").doc(uid).set({
+      lat,
+      lng,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    res.status(200).json({ message: "Location updated successfully" });
+  } catch (error) {
+    console.error("Error updating user location:", error);
+    res.status(500).json({ message: "Failed to update location" });
+  }
+};
