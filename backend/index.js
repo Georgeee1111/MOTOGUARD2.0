@@ -21,7 +21,7 @@ const GPS_SECRET = process.env.GPS_SECRET ?? null;
 const DISTANCE_THRESHOLD = Number(process.env.DISTANCE_THRESHOLD ?? 15); // meters
 const GPS_NOISE_THRESHOLD = Number(process.env.GPS_NOISE_THRESHOLD ?? 5); // meters
 const HOME_READINGS_REQUIRED = Number(process.env.HOME_READINGS_REQUIRED ?? 3);
-
+const REPORT_COOLDOWN_MS = Number(process.env.REPORT_COOLDOWN_MS ?? 60 * 1000);
 
 const MQTT_BROKER = process.env.MQTT_BROKER || "mqtts://cee1784455524214820f3387732533d6.s1.eu.hivemq.cloud:8883";
 const MQTT_USER = process.env.MQTT_USER || "Kazuki";
@@ -48,6 +48,7 @@ let homeLocation = null;
 let initialReadings = [];
 let policeStations = [];
 let emergencyActive = false;
+const lastReports = {}; // per-station cooldown
 
 // Mock loop control
 let _mockIntervalId = null;
@@ -133,20 +134,15 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-function getNearestStation(lat, lng, stations) {
+function getNearestStation(lat, lng, stations, maxDistance = 100) {
   let nearest = null;
   let minDist = Infinity;
-
   for (const s of stations) {
     const d = getDistance(lat, lng, s.lat, s.lng);
-    if (d < minDist) {
-      minDist = d;
-      nearest = { ...s, distance: d };
-    }
+    if (d < minDist) { minDist = d; nearest = { ...s, distance: d }; }
   }
-  return nearest; 
+  return nearest && nearest.distance <= maxDistance ? nearest : null;
 }
-
 
 // ==========================
 // 📡 Expo Push Notifications
@@ -294,7 +290,7 @@ async function handleData(data, source = "gsm", isMock = false) {
     return;
   }
 
-  const nearest = getNearestStation(lat, lng, policeStations);
+  const nearest = getNearestStation(lat, lng, policeStations, 100);
 
   // Warning
   if (distanceFromHome >= 11 && distanceFromHome < DISTANCE_THRESHOLD) {
@@ -313,26 +309,26 @@ async function handleData(data, source = "gsm", isMock = false) {
     return;
   }
 
-  // Emergency: Always send auto-report with no cooldown
+  // Emergency
+  const now = Date.now();
+  if (nearest?.id && lastReports[nearest.id] && now - lastReports[nearest.id] < REPORT_COOLDOWN_MS) return;
+  if (nearest?.id) lastReports[nearest.id] = now;
+
   emergencyActive = true;
-  
-  const autoReport = { 
-      station_id: nearest?.id ?? null,
-      station_name: nearest?.name ?? nearest?.stationName ?? "Unknown", 
-      lat, 
-      lng, 
-      distance: distanceFromHome, 
-      contact_number: nearest?.contact_number ?? nearest?.contactNumber ?? null, 
-      source, 
-      status: "emergency", 
-      message: "Vehicle has been stolen", 
-      timestamp: admin.firestore.FieldValue.serverTimestamp() 
-  };
-  
-  try { 
-      await admin.firestore().collection("auto_reports").add(autoReport); 
-  } catch (e) { 
-      logWarn("Firestore add auto_reports failed", "firestore", { error: e.message }); 
+  const autoReport = { station_id: nearest?.id ?? null, station_name: nearest?.name ?? nearest?.stationName ?? "Unknown", lat, lng, distance: distanceFromHome, contact_number: nearest?.contact_number ?? nearest?.contactNumber ?? null, source, status: "emergency", message: "Vehicle moved beyond safety threshold — possible theft detected", timestamp: admin.firestore.FieldValue.serverTimestamp() };
+  try { await admin.firestore().collection("auto_reports").add(autoReport); } catch (e) { logWarn("Firestore add auto_reports failed", "firestore", { error: e.message }); }
+
+  notificationLogs.push({ number: nearest?.contact_number ?? "N/A", message: "Emergency reported", type: "emergency", date: new Date().toLocaleString(), timestamp: new Date(), lat, lng, distance: distanceFromHome });
+
+  try { await admin.database().ref("device1/history").push({ ...latestArduinoData, status: "emergency", createdAt: admin.database.ServerValue.TIMESTAMP }); } 
+  catch (e) { logWarn("RTDB push failed (emergency)", "firebase", { error: e.message }); }
+
+  // Send push notification
+  if (pushTokens.length > 0) {
+    await sendPushNotification(pushTokens, "Emergency Alert", "Vehicle moved beyond safety threshold!");
+  }
+
+  logInfo("Emergency reported", "auto_report", { nearest, latestArduinoData });
 }
 
 // ==========================
@@ -428,8 +424,6 @@ mqttClient.on("message", async (topic, msgBuffer) => {
     } else logInfo("Unhandled MQTT topic", "mqtt", { topic, rawMsg });
   } catch (err) { logError(`Error processing MQTT message: ${err.message ?? err}`, "mqtt_processing"); }
 });
-
-}
 
 // ==========================
 // 🚀 Start server
