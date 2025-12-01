@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-const { registerUser, updateUserProfile } = require("../controllers/auth/userController");
+const { registerUser, updateUserProfile, updateUserLocation } = require("../controllers/auth/userController");
 const { registerStation, updateStationProfile } = require("../controllers/auth/stationController");
 const { getEmailByUsername, getUserProfile, getUserByContactNumber } = require("../controllers/auth/helperController");
 
@@ -38,6 +38,13 @@ router.patch(
   authenticateFirebaseToken,
   authorizeRole(["police"]),
   updateStationProfile
+);
+
+router.post(
+  "/update-location/:uid",
+  authenticateFirebaseToken, 
+  authorizeRole(["owner"]),  
+  updateUserLocation
 );
 
 // ------------------------
