@@ -41,7 +41,7 @@ const MAX_LOGS = Number(process.env.MAX_LOGS ?? 200);
 // ✅ Runtime state
 // ==========================
 let SYSTEM_ACTIVE = SYSTEM_AUTO_ON;
-let latestArduinoData: null | DeviceData = null;
+let latestArduinoData = null;
 let systemLogs = [];
 let notificationLogs = [];
 let homeLocation = null;
