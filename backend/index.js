@@ -134,16 +134,18 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-function getNearestStation(lat, lng, stations, maxDistance = 100) {
+function getNearestStation(lat, lng, stations) {
   let nearest = null;
   let minDist = Infinity;
   for (const s of stations) {
     const d = getDistance(lat, lng, s.lat, s.lng);
-    if (d < minDist) { minDist = d; nearest = { ...s, distance: d }; }
+    if (d < minDist) { 
+      minDist = d; 
+      nearest = { ...s, distance: d }; 
+    }
   }
-  return nearest && nearest.distance <= maxDistance ? nearest : null;
+  return nearest; // always returns the closest station
 }
-
 // ==========================
 // 📡 Expo Push Notifications
 // ==========================
@@ -290,7 +292,7 @@ async function handleData(data, source = "gsm", isMock = false) {
     return;
   }
 
-  const nearest = getNearestStation(lat, lng, policeStations, 100);
+  const nearest = getNearestStation(lat, lng, policeStations);
 
   // Warning
   if (distanceFromHome >= 11 && distanceFromHome < DISTANCE_THRESHOLD) {
@@ -309,26 +311,52 @@ async function handleData(data, source = "gsm", isMock = false) {
     return;
   }
 
-  // Emergency
-  const now = Date.now();
-  if (nearest?.id && lastReports[nearest.id] && now - lastReports[nearest.id] < REPORT_COOLDOWN_MS) return;
-  if (nearest?.id) lastReports[nearest.id] = now;
+ // Emergency
+emergencyActive = true;
 
-  emergencyActive = true;
-  const autoReport = { station_id: nearest?.id ?? null, station_name: nearest?.name ?? nearest?.stationName ?? "Unknown", lat, lng, distance: distanceFromHome, contact_number: nearest?.contact_number ?? nearest?.contactNumber ?? null, source, status: "emergency", message: "Vehicle moved beyond safety threshold — possible theft detected", timestamp: admin.firestore.FieldValue.serverTimestamp() };
-  try { await admin.firestore().collection("auto_reports").add(autoReport); } catch (e) { logWarn("Firestore add auto_reports failed", "firestore", { error: e.message }); }
+const autoReport = {
+  station_id: nearest?.id ?? null,
+  station_name: nearest?.name ?? nearest?.stationName ?? "Unknown",
+  lat,
+  lng,
+  distance: distanceFromHome,
+  contact_number: nearest?.contact_number ?? nearest?.contactNumber ?? null,
+  source,
+  status: "emergency",
+  message: "Vehicle moved beyond safety threshold — possible theft detected",
+  timestamp: admin.firestore.FieldValue.serverTimestamp()
+};
 
-  notificationLogs.push({ number: nearest?.contact_number ?? "N/A", message: "Emergency reported", type: "emergency", date: new Date().toLocaleString(), timestamp: new Date(), lat, lng, distance: distanceFromHome });
+try { 
+  await admin.firestore().collection("auto_reports").add(autoReport); 
+} catch (e) { 
+  logWarn("Firestore add auto_reports failed", "firestore", { error: e.message }); 
+}
 
-  try { await admin.database().ref("device1/history").push({ ...latestArduinoData, status: "emergency", createdAt: admin.database.ServerValue.TIMESTAMP }); } 
-  catch (e) { logWarn("RTDB push failed (emergency)", "firebase", { error: e.message }); }
+notificationLogs.push({
+  number: nearest?.contact_number ?? "N/A",
+  message: "Emergency reported",
+  type: "emergency",
+  date: new Date().toLocaleString(),
+  timestamp: new Date(),
+  lat,
+  lng,
+  distance: distanceFromHome
+});
 
-  // Send push notification
-  if (pushTokens.length > 0) {
-    await sendPushNotification(pushTokens, "Emergency Alert", "Vehicle moved beyond safety threshold!");
-  }
+try { 
+  await admin.database().ref("device1/history").push({ ...latestArduinoData, status: "emergency", createdAt: admin.database.ServerValue.TIMESTAMP }); 
+} catch (e) { 
+  logWarn("RTDB push failed (emergency)", "firebase", { error: e.message }); 
+}
 
-  logInfo("Emergency reported", "auto_report", { nearest, latestArduinoData });
+// Send push notification
+if (pushTokens.length > 0) {
+  await sendPushNotification(pushTokens, "Emergency Alert", "Vehicle moved beyond safety threshold!");
+}
+
+logInfo("Emergency reported", "auto_report", { nearest, latestArduinoData });
+  
 }
 
 // ==========================
