@@ -406,6 +406,7 @@ app.post("/api/system/toggle", async (req, res) => {
   } catch (err) { logError("Toggle error: " + err.message, "system"); res.status(500).json({ error: "server error" }); }
 });
 
+
 const userRoutes = require("./routes/users");
 const reportRoutes = require("./routes/reportRoutes");
 app.use("/api/users", userRoutes);
@@ -413,6 +414,11 @@ app.use("/api/reports", reportRoutes);
 
 app.get("/api/arduino", (req, res) => res.json(latestArduinoData));
 app.get("/", (req, res) => res.send("✅ Backend running + Firebase RTDB + Firestore connected"));
+
+app.get("/api/police_stations", (req, res) => {
+  res.json(policeStations);
+});
+
 
 // ==========================
 // 📡 MQTT integration
