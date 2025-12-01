@@ -41,7 +41,7 @@ const MAX_LOGS = Number(process.env.MAX_LOGS ?? 200);
 // ✅ Runtime state
 // ==========================
 let SYSTEM_ACTIVE = SYSTEM_AUTO_ON;
-let latestArduinoData = { error: "No data yet" };
+let latestArduinoData: null | DeviceData = null;
 let systemLogs = [];
 let notificationLogs = [];
 let homeLocation = null;
@@ -442,22 +442,38 @@ mqttClient.on("reconnect", () => logInfo("MQTT reconnecting...", "mqtt"));
 mqttClient.on("close", () => logWarn("MQTT connection closed", "mqtt"));
 mqttClient.on("error", (err) => logError(`MQTT client error: ${err.message ?? err}`, "mqtt"));
 
-mqttClient.on("message", async (topic, msgBuffer) => {
+mqttClient.on("message", async (topic, msgBuffer, packet) => {
   const rawMsg = msgBuffer.toString();
+
+  // Ignore retained MQTT messages
+  if (packet.retain) {
+    logInfo("Ignoring retained MQTT message", "mqtt", { topic, rawMsg });
+    return;
+  }
+
   logInfo("Raw MQTT message received", "mqtt_raw", { topic, rawMsg });
   let parsed = null;
-  try { parsed = JSON.parse(rawMsg); } catch (err) { logWarn("MQTT payload is not JSON", "mqtt", { topic, rawMsg }); }
+  try { parsed = JSON.parse(rawMsg); } catch (err) {
+    logWarn("MQTT payload is not JSON", "mqtt", { topic, rawMsg });
+  }
+
   try {
     if (topic.endsWith("/gps") && parsed?.lat !== undefined && parsed?.lng !== undefined) {
-      await handleData({ lat: Number(parsed.lat), lng: Number(parsed.lng), motion: !!parsed.motion, timestamp: parsed.timestamp ?? Date.now() }, "mqtt");
+      await handleData(
+        { lat: Number(parsed.lat), lng: Number(parsed.lng), motion: !!parsed.motion, timestamp: parsed.timestamp ?? Date.now() },
+        "mqtt"
+      );
     } else if (topic.endsWith("/logs")) {
       const messageToStore = parsed?.message ?? rawMsg;
       const logEntry = logSystem(messageToStore, "mqtt", parsed ?? { raw: rawMsg });
       if (systemLogs.length > MAX_LOGS) systemLogs.shift();
       logInfo("Stored MQTT log", "mqtt", { topic, logEntry });
     } else logInfo("Unhandled MQTT topic", "mqtt", { topic, rawMsg });
-  } catch (err) { logError(`Error processing MQTT message: ${err.message ?? err}`, "mqtt_processing"); }
+  } catch (err) {
+    logError(`Error processing MQTT message: ${err.message ?? err}`, "mqtt_processing");
+  }
 });
+
 
 // ==========================
 // 🚀 Start server
