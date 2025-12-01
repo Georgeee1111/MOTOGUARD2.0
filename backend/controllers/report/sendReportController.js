@@ -16,6 +16,7 @@ exports.sendReport = async (req, res) => {
     receiverRole,
     description,
     additionalInfo,
+    attachments, // NEW: attachments from frontend
   } = req.body;
 
   const uid = req.user?.uid;
@@ -45,7 +46,7 @@ exports.sendReport = async (req, res) => {
   try {
     const newReport = {
       owner,
-      senderUid: uid, // Use UID instead of contactNumber
+      senderUid: uid,
       phone,
       date,
       time,
@@ -56,6 +57,7 @@ exports.sendReport = async (req, res) => {
       receiverRole,
       description: description || "",
       additionalInfo: additionalInfo || "",
+      attachments: attachments || {}, // ✅ store attachments here
       status: "unread",
       archived: false,
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
