@@ -103,8 +103,10 @@ exports.updateUserProfile = async (req, res) => {
     console.error("❌ Update error:", error);
     return res.status(400).json({ error: error.message });
   }
+
 };
 
+// Update User Location
 exports.updateUserLocation = async (req, res) => {
   try {
     const { uid } = req.params;
@@ -125,5 +127,33 @@ exports.updateUserLocation = async (req, res) => {
   } catch (error) {
     console.error("Error updating user location:", error);
     res.status(500).json({ message: "Failed to update location" });
+  }
+};
+
+// Get Device + Active Owner Info
+exports.getDeviceOwnerInfo = async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+
+    // 1️⃣ Fetch device from RTDB
+    const deviceSnapshot = await admin.database().ref(deviceId).get();
+    const deviceData = deviceSnapshot.val();
+
+    if (!deviceData) return res.status(404).json({ message: "Device not found" });
+
+    // 2️⃣ Fetch owner from Firestore using activeOwnerId
+    let ownerData = null;
+    if (deviceData.activeOwnerId) {
+      const ownerDoc = await admin.firestore()
+        .collection("users")
+        .doc(deviceData.activeOwnerId)
+        .get();
+      if (ownerDoc.exists) ownerData = ownerDoc.data();
+    }
+
+    res.json({ device: deviceData, owner: ownerData });
+  } catch (err) {
+    console.error("Error fetching device owner info:", err);
+    res.status(500).json({ message: "Server error" });
   }
 };
