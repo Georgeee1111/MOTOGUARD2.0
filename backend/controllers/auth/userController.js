@@ -157,3 +157,30 @@ exports.getDeviceOwnerInfo = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+// Register/update Expo push token
+exports.registerPushToken = async (req, res) => {
+  try {
+    const { uid, expoPushToken } = req.body;
+
+    if (!uid || !expoPushToken) {
+      return res.status(400).json({ message: "uid and expoPushToken are required" });
+    }
+
+    const userRef = admin.firestore().collection("users").doc(uid);
+
+    // Add or update the push token (store as array to support multiple devices)
+    await userRef.set(
+      {
+        expoPushTokens: admin.firestore.FieldValue.arrayUnion(expoPushToken),
+      },
+      { merge: true }
+    );
+
+    return res.status(200).json({ message: "Push token registered successfully" });
+  } catch (err) {
+    console.error("Error registering push token:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
