@@ -272,10 +272,7 @@ async function handleData(data, source = "gsm", isMock = false) {
   latestArduinoData = { lat, lng, motion: !!data.motion, timestamp: data.timestamp ?? Date.now(), distance: distanceFromHome, moved, source };
   logInfo("Processed GPS", "gps", { lat, lng, distanceFromHome, moved, source });
 
-  // ========================
-  // Push Notifications
-  // ========================
-  // Get all push tokens from Firestore for users to notify
+  // Fetch push tokens
   let pushTokens = [];
   try {
     const snapshot = await admin.firestore().collection("users").get();
@@ -284,108 +281,91 @@ async function handleData(data, source = "gsm", isMock = false) {
     logError("Failed to fetch push tokens: " + err.message, "expo");
   }
 
-  // Close to home — normal
-  if (!data.motion && distanceFromHome < DISTANCE_THRESHOLD) {
-  // skip logging normal status
-  latestArduinoData = { ...latestArduinoData, status: "idle" }; 
-  return;
-}
-
   const nearest = getNearestStation(lat, lng, policeStations);
 
-  // Warning
-  // Warning: triggered by motion only
-if (data.motion && !emergencyActive) {
-  const warningData = {
-    lat,
-    lng,
-    distance: distanceFromHome,
-    type: "warning",
-    message: "Warning Alert",
-    station_id: nearest?.id ?? null,
-    station_name: nearest?.name ?? nearest?.stationName ?? null,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-  };
+  // Motion Warning
+  if (data.motion && !emergencyActive) {
+    const warningData = {
+      lat,
+      lng,
+      type: "warning",
+      message: "Warning Alert",
+      station_id: nearest?.id ?? null,
+      station_name: nearest?.name ?? nearest?.stationName ?? null,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    };
 
-  try {
-    await admin.firestore().collection("notifications").add(warningData);
-  } catch (e) {
-    logWarn("Firestore add notifications failed", "firestore", { error: e.message });
+    try { await admin.firestore().collection("notifications").add(warningData); } 
+    catch (e) { logWarn("Firestore add notifications failed", "firestore", { error: e.message }); }
+
+    try {
+      await admin.database().ref("device1/history").push({ ...latestArduinoData, status: "warning", createdAt: admin.database.ServerValue.TIMESTAMP });
+    } catch (e) { logWarn("RTDB push failed (warning)", "firebase", { error: e.message }); }
+
+    if (pushTokens.length > 0) {
+      await sendPushNotification(pushTokens, "Warning Alert", "Motion detected in vehicle");
+    }
+
+    logInfo("Motion warning triggered", "motion");
   }
 
-  // ✅ Push warning to RTDB so RN app can pick it up
-  try {
-    await admin.database().ref("device1/history").push({
-      ...latestArduinoData,
-      status: "warning",
-      createdAt: admin.database.ServerValue.TIMESTAMP,
+  // Emergency
+  if (distanceFromHome >= DISTANCE_THRESHOLD) {
+    if (!emergencyActive) logInfo("Emergency triggered", "system");
+    emergencyActive = true;
+
+    if (USE_ARDUINO) {
+      mqttClient.publish("esp32_01/buzzer", "on", { qos: 0, retain: false }, (err) => {
+        if (err) logError("Failed to send buzzer command via MQTT: " + err.message, "mqtt");
+        else logInfo("Buzzer command sent: on", "mqtt");
+      });
+    }
+
+    const autoReport = {
+      station_id: nearest?.id ?? null,
+      station_name: nearest?.name ?? nearest?.stationName ?? "Unknown",
+      lat,
+      lng,
+      distance: distanceFromHome,
+      contact_number: nearest?.contact_number ?? nearest?.contactNumber ?? null,
+      source,
+      status: "emergency",
+      message: "Vehicle moved beyond safety threshold — possible theft detected",
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    try { await admin.firestore().collection("auto_reports").add(autoReport); } 
+    catch (e) { logWarn("Firestore add auto_reports failed", "firestore", { error: e.message }); }
+
+    notificationLogs.push({
+      number: nearest?.contact_number ?? "N/A",
+      message: "Emergency reported",
+      type: "emergency",
+      date: new Date().toLocaleString(),
+      timestamp: new Date(),
+      lat,
+      lng,
+      distance: distanceFromHome
     });
-  } catch (e) {
-    logWarn("RTDB push failed (warning)", "firebase", { error: e.message });
+
+    try { await admin.database().ref("device1/history").push({ ...latestArduinoData, status: "emergency", createdAt: admin.database.ServerValue.TIMESTAMP }); } 
+    catch (e) { logWarn("RTDB push failed (emergency)", "firebase", { error: e.message }); }
+
+    if (pushTokens.length > 0) {
+      await sendPushNotification(pushTokens, "Emergency Alert", "Vehicle moved beyond safety threshold!");
+    }
+
+    logInfo("Emergency reported", "auto_report", { nearest, latestArduinoData });
+  } else if (emergencyActive && distanceFromHome < DISTANCE_THRESHOLD) {
+    // Reset emergency if back within safe range
+    emergencyActive = false;
+    logInfo("Emergency cleared — back within threshold", "system");
   }
 
-  // Send push notifications to Expo tokens
-  if (pushTokens.length > 0) {
-    await sendPushNotification(pushTokens, "Warning Alert", "Motion detected in vehicle");
+  // Normal / idle
+  if (!data.motion && distanceFromHome < DISTANCE_THRESHOLD) {
+    latestArduinoData.status = "idle";
   }
-
-  logInfo("Motion warning triggered", "motion");
-}
-
-
- // Emergency
-emergencyActive = true;
-if (USE_ARDUINO) {
-  const buzzerState = (distanceFromHome >= DISTANCE_THRESHOLD ? "ON" : "OFF").toLowerCase();
-  mqttClient.publish("esp32_01/buzzer", buzzerState, { qos: 0, retain: false }, (err) => {
-    if (err) logError("Failed to send buzzer command via MQTT: " + err.message, "mqtt");
-    else logInfo(`Buzzer command sent: ${buzzerState}`, "mqtt");
-  });
-}
-
-const autoReport = {
-  station_id: nearest?.id ?? null,
-  station_name: nearest?.name ?? nearest?.stationName ?? "Unknown",
-  lat,
-  lng,
-  distance: distanceFromHome,
-  contact_number: nearest?.contact_number ?? nearest?.contactNumber ?? null,
-  source,
-  status: "emergency",
-  message: "Vehicle moved beyond safety threshold — possible theft detected",
-  timestamp: admin.firestore.FieldValue.serverTimestamp()
-};
-
-try { 
-  await admin.firestore().collection("auto_reports").add(autoReport); 
-} catch (e) { 
-  logWarn("Firestore add auto_reports failed", "firestore", { error: e.message }); 
-}
-
-notificationLogs.push({
-  number: nearest?.contact_number ?? "N/A",
-  message: "Emergency reported",
-  type: "emergency",
-  date: new Date().toLocaleString(),
-  timestamp: new Date(),
-  lat,
-  lng,
-  distance: distanceFromHome
-});
-
-try { 
-  await admin.database().ref("device1/history").push({ ...latestArduinoData, status: "emergency", createdAt: admin.database.ServerValue.TIMESTAMP }); 
-} catch (e) { 
-  logWarn("RTDB push failed (emergency)", "firebase", { error: e.message }); 
-}
-
-// Send push notification
-if (pushTokens.length > 0) {
-  await sendPushNotification(pushTokens, "Emergency Alert", "Vehicle moved beyond safety threshold!");
-}
-
-logInfo("Emergency reported", "auto_report", { nearest, latestArduinoData });
-  
 }
 
 // ==========================
