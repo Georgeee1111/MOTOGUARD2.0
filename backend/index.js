@@ -285,12 +285,11 @@ async function handleData(data, source = "gsm", isMock = false) {
   }
 
   // Close to home — normal
-  if (distanceFromHome < 11) {
-    emergencyActive = false;
-    try { await admin.database().ref("device1/history").push({ ...latestArduinoData, status: "normal", createdAt: admin.database.ServerValue.TIMESTAMP }); } 
-    catch (e) { logWarn("RTDB push failed (normal)", "firebase", { error: e.message }); }
-    return;
-  }
+  if (!data.motion && distanceFromHome < DISTANCE_THRESHOLD) {
+  // skip logging normal status
+  latestArduinoData = { ...latestArduinoData, status: "idle" }; 
+  return;
+}
 
   const nearest = getNearestStation(lat, lng, policeStations);
 
