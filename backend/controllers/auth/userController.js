@@ -135,18 +135,18 @@ exports.getDeviceOwnerInfo = async (req, res) => {
   try {
     const { deviceId } = req.params;
 
-    // 1️⃣ Fetch device from RTDB
+    // Fetch device from RTDB
     const deviceSnapshot = await admin.database().ref(deviceId).get();
     const deviceData = deviceSnapshot.val();
 
     if (!deviceData) return res.status(404).json({ message: "Device not found" });
 
-    // 2️⃣ Fetch owner from Firestore using activeOwnerId
+    // Fetch owner from Firestore using ownerUid
     let ownerData = null;
-    if (deviceData.activeOwnerId) {
+    if (deviceData.activeOwnerId?.ownerUid) {
       const ownerDoc = await admin.firestore()
         .collection("users")
-        .doc(deviceData.activeOwnerId)
+        .doc(deviceData.activeOwnerId.ownerUid)
         .get();
       if (ownerDoc.exists) ownerData = ownerDoc.data();
     }
