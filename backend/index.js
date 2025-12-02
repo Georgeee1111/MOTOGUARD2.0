@@ -314,7 +314,7 @@ async function handleData(data, source = "gsm", isMock = false) {
  // Emergency
 emergencyActive = true;
 if (USE_ARDUINO) {
-  const buzzerState = distanceFromHome >= DISTANCE_THRESHOLD ? "ON" : "OFF";
+  const buzzerState = (distanceFromHome >= DISTANCE_THRESHOLD ? "ON" : "OFF").toLowerCase();
   mqttClient.publish("esp32_01/buzzer", buzzerState, { qos: 0, retain: false }, (err) => {
     if (err) logError("Failed to send buzzer command via MQTT: " + err.message, "mqtt");
     else logInfo(`Buzzer command sent: ${buzzerState}`, "mqtt");
