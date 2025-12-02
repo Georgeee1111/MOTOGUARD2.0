@@ -284,14 +284,6 @@ async function handleData(data, source = "gsm", isMock = false) {
     logError("Failed to fetch push tokens: " + err.message, "expo");
   }
 
-  // Close to home — normal
-  if (distanceFromHome < 11) {
-    emergencyActive = false;
-    try { await admin.database().ref("device1/history").push({ ...latestArduinoData, status: "normal", createdAt: admin.database.ServerValue.TIMESTAMP }); } 
-    catch (e) { logWarn("RTDB push failed (normal)", "firebase", { error: e.message }); }
-    return;
-  }
-
   const nearest = getNearestStation(lat, lng, policeStations);
 
   // Warning
