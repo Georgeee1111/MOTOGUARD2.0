@@ -295,21 +295,51 @@ async function handleData(data, source = "gsm", isMock = false) {
   const nearest = getNearestStation(lat, lng, policeStations);
 
   // Warning
-  if (distanceFromHome >= 11 && distanceFromHome < DISTANCE_THRESHOLD) {
-    const warningData = { lat, lng, distance: distanceFromHome, type: "warning", message: "Warning Alert", station_id: nearest?.id ?? null, station_name: nearest?.name ?? nearest?.stationName ?? null, timestamp: admin.firestore.FieldValue.serverTimestamp() };
-    try { await admin.firestore().collection("notifications").add(warningData); } catch (e) { logWarn("Firestore add notifications failed", "firestore", { error: e.message }); }
-    notificationLogs.push({ number: nearest?.contact_number ?? nearest?.contactNumber ?? "N/A", message: "Warning Alert", type: "warning", date: new Date().toLocaleString(), timestamp: new Date() });
+  // Warning: triggered by motion only
+if (data.motion && !emergencyActive) {  // only if not already in emergency
+  const warningData = { 
+    lat, 
+    lng, 
+    distance: distanceFromHome,  // optional, can keep for logs
+    type: "warning", 
+    message: "Warning Alert", 
+    station_id: nearest?.id ?? null, 
+    station_name: nearest?.name ?? nearest?.stationName ?? null, 
+    timestamp: admin.firestore.FieldValue.serverTimestamp() 
+  };
 
-    try { await admin.database().ref("device1/history").push({ ...latestArduinoData, status: "warning", createdAt: admin.database.ServerValue.TIMESTAMP }); } 
-    catch (e) { logWarn("RTDB push failed (warning)", "firebase", { error: e.message }); }
-
-    // Send push notification
-    if (pushTokens.length > 0) {
-      await sendPushNotification(pushTokens, "Warning Alert", "Vehicle moved slightly from home");
-    }
-
-    return;
+  try { 
+    await admin.firestore().collection("notifications").add(warningData); 
+  } catch (e) { 
+    logWarn("Firestore add notifications failed", "firestore", { error: e.message }); 
   }
+
+  notificationLogs.push({ 
+    number: nearest?.contact_number ?? nearest?.contactNumber ?? "N/A", 
+    message: "Warning Alert", 
+    type: "warning", 
+    date: new Date().toLocaleString(), 
+    timestamp: new Date() 
+  });
+
+  try { 
+    await admin.database().ref("device1/history").push({ 
+      ...latestArduinoData, 
+      status: "warning", 
+      createdAt: admin.database.ServerValue.TIMESTAMP 
+    }); 
+  } catch (e) { 
+    logWarn("RTDB push failed (warning)", "firebase", { error: e.message }); 
+  }
+
+  // Send push notification
+  if (pushTokens.length > 0) {
+    await sendPushNotification(pushTokens, "Warning Alert", "Motion detected in vehicle");
+  }
+
+  logInfo("Motion warning triggered", "motion");
+}
+
 
  // Emergency
 emergencyActive = true;
